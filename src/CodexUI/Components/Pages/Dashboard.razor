@@ -1,0 +1,57 @@
+@page "/"
+@inject IDashboardViewService DashboardViewService
+
+<PageTitle>CodexUI Dashboard</PageTitle>
+
+<section class="dashboard">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Monitor Shell</p>
+            <h1>@model.Title</h1>
+        </div>
+        <div class="status-pill">@model.EnvironmentLabel</div>
+    </header>
+
+    <div class="summary-grid">
+        @foreach (DashboardStatusCard card in model.Cards)
+        {
+            <article class="status-card">
+                <span class="card-label">@card.Label</span>
+                <strong>@card.Value</strong>
+                <span class="card-note">@card.Note</span>
+            </article>
+        }
+    </div>
+
+    <section class="work-surface">
+        <div class="panel">
+            <div class="panel-heading">
+                <h2>Watched Solution</h2>
+                <span>@model.WatchedSolutionState</span>
+            </div>
+            <p>@model.WatchedSolutionPath</p>
+        </div>
+
+        <div class="panel">
+            <div class="panel-heading">
+                <h2>Next Surfaces</h2>
+                <span>placeholders</span>
+            </div>
+            <ul class="surface-list">
+                @foreach (string item in model.PendingSurfaces)
+                {
+                    <li>@item</li>
+                }
+            </ul>
+        </div>
+    </section>
+</section>
+
+@code {
+    private MonitorDashboardViewModel model = MonitorDashboardViewModel.Empty;
+
+    protected override void OnInitialized()
+    {
+        model = DashboardViewService.GetDashboard();
+    }
+}

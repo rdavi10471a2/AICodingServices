@@ -14,6 +14,7 @@
     <Project Path="src/AICodingServices.McpServer/AICodingServices.McpServer.csproj" />
     <Project Path="src/AICodingServices.McpStdioBridge/AICodingServices.McpStdioBridge.csproj" />
     <Project Path="src/AICodingServices.McpHub/AICodingServices.McpHub.csproj" />
+    <Project Path="src/CodexUI/CodexUI.csproj" />
   </Folder>
   <Folder Name="/tests/unit/">
     <Project Path="tests/unit/AICodingServices.Core.Tests/AICodingServices.Core.Tests.csproj" />

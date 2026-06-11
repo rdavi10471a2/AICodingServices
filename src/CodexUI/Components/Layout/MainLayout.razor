@@ -1,0 +1,20 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand-mark">C</span>
+            <span class="brand-name">CodexUI</span>
+        </div>
+        <nav class="nav-list" aria-label="Primary">
+            <NavLink href="/" Match="NavLinkMatch.All">Dashboard</NavLink>
+            <span class="nav-disabled">Sessions</span>
+            <span class="nav-disabled">Index</span>
+            <span class="nav-disabled">Review</span>
+        </nav>
+    </aside>
+
+    <main class="content">
+        @Body
+    </main>
+</div>
