@@ -1,0 +1,612 @@
+@page "/domain-object-editor"
+
+@using Radzen
+@using Radzen.Blazor
+@using Microsoft.AspNetCore.Components.Web
+@using SchemaStudio.AIHelpers
+@using SchemaStudio.Data.Models
+@using SchemaStudio.Data.Repositories
+@using SchemaStudioWebViewer.Components.HelpSystem
+@using SchemaStudioWebViewer.Data
+
+@inject DatabaseRepository DatabaseRepository
+@inject DatabaseDomainRepository DatabaseDomainRepository
+@inject SchemaObjectRepository SchemaObjectRepository
+@inject ReadOnlyViewDefinitionRepository ViewDefinitionRepository
+@inject CteFieldParser Parser
+@inject IJSRuntime JSRuntime
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject TooltipService TooltipService
+
+@attribute [FileVersion("1.3")]
+@attribute [AIFileContext("Components/Pages/DomainObjectEditor/DomainObjectEditor.razor", "Domain object editor projection page driven by a selected composed managed view.", Responsibilities = "Loads database, domain, and composed-view selections, retrieves static SQL text for the selected managed view, feeds it into the CTE selection engine, and renders projection/path trimming controls.", Nuances = "The editor parser is intentionally text driven. This page supplies that text from Schema Studio metadata instead of a paste box.", RelatedFiles = "CteFieldParser.cs; CteSelectionSessionEditor.cs; CteSelectionPresentationEditor.cs; DomainObjectEditor.razor.css", LastReviewed = "2026-05-13")]
+
+<PageTitle>Domain Object Editor</PageTitle>
+
+<section class="cte-workbench">
+    <div class="cte-workbench__header">
+        <div class="cte-workbench__title">
+            <h1>Domain Object Editor</h1>
+            <RadzenIcon Icon="help_outline"
+                        class="cte-help-icon"
+                        @onclick="@OpenHelpAsync"
+                        MouseEnter="@((ElementReference args) => TooltipService.Open(args, "Select a composed managed view, then project fields and paths from its parsed SQL surface."))" />
+        </div>
+        <div class="cte-workbench__actions">
+            <RadzenButton Text="Reload SQL"
+                          Icon="refresh"
+                          ButtonStyle="ButtonStyle.Light"
+                          Disabled="@(!SelectedObjectId.HasValue || IsBusy)"
+                          Click="@((MouseEventArgs _) => ReloadSelectedViewSqlAsync())" />
+        </div>
+    </div>
+
+    <div class="cte-selector-bar">
+        <div class="cte-selector-field">
+            <RadzenIcon Icon="info"
+                        class="cte-help-icon"
+                        MouseEnter="@((ElementReference args) => TooltipService.Open(args, "Database metadata source used to list domains and composed views."))" />
+            <RadzenDropDown Data="@Databases"
+                            TextProperty="@nameof(DatabaseDefinition.DatabaseName)"
+                            ValueProperty="@nameof(DatabaseDefinition.DatabaseId)"
+                            Placeholder="Database"
+                            @bind-Value="@SelectedDatabaseId"
+                            Change="@OnDatabaseChanged"
+                            Disabled="@IsBusy"
+                            Style="width:100%;"
+                            AllowClear="true" />
+        </div>
+        <div class="cte-selector-field">
+            <RadzenIcon Icon="info"
+                        class="cte-help-icon"
+                        MouseEnter="@((ElementReference args) => TooltipService.Open(args, "Business domain used to narrow the composed object list."))" />
+            <RadzenDropDown Data="@Domains"
+                            TextProperty="@nameof(DatabaseDomainDefinition.Domain)"
+                            ValueProperty="@nameof(DatabaseDomainDefinition.Domain)"
+                            Placeholder="Business Domain"
+                            @bind-Value="@SelectedDomain"
+                            Change="@OnDomainChanged"
+                            Disabled="@(IsBusy || !SelectedDatabaseId.HasValue)"
+                            Style="width:100%;"
+                            AllowClear="true" />
+        </div>
+        <div class="cte-selector-field cte-selector-field--wide">
+            <RadzenIcon Icon="info"
+                        class="cte-help-icon"
+                        MouseEnter="@((ElementReference args) => TooltipService.Open(args, "Only composed managed views are listed here. Base views stay in the modeler."))" />
+            <RadzenDropDown Data="@ComposedViews"
+                            TextProperty="@nameof(DomainEditorViewItem.DisplayName)"
+                            ValueProperty="@nameof(DomainEditorViewItem.SchemaObjectId)"
+                            Placeholder="Composed View"
+                            @bind-Value="@SelectedObjectId"
+                            Change="@OnObjectChanged"
+                            Disabled="@(IsBusy || string.IsNullOrWhiteSpace(SelectedDomain))"
+                            Style="width:100%;"
+                            AllowClear="true" />
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(LoadError))
+    {
+        <div class="cte-status-bar cte-status-bar--error" role="alert">
+            <RadzenIcon Icon="error" />
+            <span>@LoadError</span>
+        </div>
+    }
+    <div @ref="ShapeLayoutRef" class="cte-shape-layout @(IsInspectorCollapsed ? "cte-shape-layout--collapsed" : null)">
+        <div class="cte-output-pane @OutputPaneClass">
+            <div class="cte-primary-tabs">
+                <button class="@PrimaryTabClass("source")" @onclick='() => SelectPrimaryTab("source")'>Source Object SQL</button>
+                <button class="@PrimaryTabClass("build")" @onclick='() => SelectPrimaryTab("build")'>New Object</button>
+                <button class="@PrimaryTabClass("result")" @onclick='() => SelectPrimaryTab("result")'>Result SQL</button>
+                <button class="@PrimaryTabClass("result-cte")" @onclick='() => SelectPrimaryTab("result-cte")'>Result SQL CTE</button>
+            </div>
+
+            @if (ActivePrimaryTab == "source")
+            {
+                <label class="cte-editor cte-editor--fill">
+                    <textarea @bind="InputSql" readonly spellcheck="false"></textarea>
+                </label>
+            }
+            else if (ActivePrimaryTab == "result")
+            {
+                <section class="cte-result-view">
+                    <div class="cte-result-actions">
+                        <RadzenButton Text="Validate" Icon="rule" ButtonStyle="ButtonStyle.Light" Click="@((MouseEventArgs _) => ValidateResultSql("result", "Result SQL"))" />
+                        <RadzenButton Text="Copy" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Click="@((MouseEventArgs _) => CopySqlAsync("result", "Result SQL"))" />
+                    </div>
+                    <label class="cte-editor cte-editor--fill">
+                        <textarea value="@Session.EnsureResultSql("result")" readonly spellcheck="false"></textarea>
+                    </label>
+                </section>
+            }
+            else if (ActivePrimaryTab == "result-cte")
+            {
+                <section class="cte-result-view">
+                    <div class="cte-result-actions">
+                        <RadzenButton Text="Validate" Icon="rule" ButtonStyle="ButtonStyle.Light" Click="@((MouseEventArgs _) => ValidateResultSql("result-cte", "Result SQL CTE"))" />
+                        <RadzenButton Text="Copy" Icon="content_copy" ButtonStyle="ButtonStyle.Light" Click="@((MouseEventArgs _) => CopySqlAsync("result-cte", "Result SQL CTE"))" />
+                    </div>
+                    <label class="cte-editor cte-editor--fill">
+                        <textarea value="@Session.EnsureResultSql("result-cte")" readonly spellcheck="false"></textarea>
+                    </label>
+                </section>
+            }
+            else if (Session.ParseResult?.IsSuccess == true)
+            {
+                <section class="cte-block cte-output-select">
+                    <div class="cte-block__header">
+                        <div class="cte-block__heading">
+                            <h2>Output Fields</h2>
+                            <div class="cte-state-legend">
+                                <span><i class="cte-legend-swatch cte-legend-swatch--selected"></i>Selected output</span>
+                                <span><i class="cte-legend-swatch cte-legend-swatch--removed"></i>Not selected</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cte-block__body cte-select-lines">
+                        <div class="cte-sql-keyword">SELECT</div>
+                        @foreach (var row in Session.GetOutputRows())
+                        {
+                            <label class="cte-select-line @CteSelectionPresentationEditor.LineStateClass(row.State)">
+                                <RadzenCheckBox TValue="bool"
+                                                Value="@row.State.IsSelected"
+                                                Change="@((bool isSelected) => ToggleField(row.Key, isSelected))" />
+                                <span>@row.DisplayText</span>
+                            </label>
+                        }
+                    </div>
+                </section>
+
+                <button type="button"
+                        class="cte-vertical-splitter"
+                        title="Resize object path"></button>
+
+                <section class="cte-block cte-relationship">
+                    <div class="cte-block__header">
+                        <h2>Object Path</h2>
+                    </div>
+                    <div class="cte-block__body cte-select-lines">
+                        <div class="cte-sql-keyword">FROM</div>
+                        @foreach (var row in Session.GetPathRows())
+                        {
+                            <div class="cte-relationship-line @CteSelectionPresentationEditor.PathLineStateClass(row.State)">
+                                <span class="cte-path-toggle" @onclick:stopPropagation="true">
+                                    <RadzenCheckBox TValue="bool"
+                                                    Value="@row.State.IsActive"
+                                                    Change="@((bool isSelected) => Session.SetPath(row, isSelected))" />
+                                </span>
+                                <span>@row.DisplayText</span>
+                                <span class="cte-path-action-wrap" @onclick:stopPropagation="true">
+                                    <RadzenButton class="cte-path-action"
+                                                  Text="@row.ActionText"
+                                                  Icon="@row.ActionIcon"
+                                                  ButtonStyle="ButtonStyle.Light"
+                                                  Size="ButtonSize.Small"
+                                                  Click="@((MouseEventArgs _) => TogglePathSelection(row))" />
+                                </span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(Session.StatusMessage))
+                        {
+                            <div class="cte-status-bar cte-path-status" role="status">
+                                <RadzenIcon Icon="info" />
+                                <span>@Session.StatusMessage</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(Session.RequiredPathNotice))
+                        {
+                            <div class="cte-status-bar" role="status">
+                                <RadzenIcon Icon="lock" />
+                                <span>@Session.RequiredPathNotice</span>
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(Session.WhereDependencyNotice))
+                        {
+                            <div class="cte-status-bar" role="status">
+                                <RadzenIcon Icon="filter_alt" />
+                                <span>@Session.WhereDependencyNotice</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+            else
+            {
+                <div class="cte-empty-state">@Session.OutlineText</div>
+            }
+        </div>
+
+        @if (!IsInspectorCollapsed)
+        {
+            <button type="button"
+                    class="cte-horizontal-splitter"
+                    title="Resize referenced objects"></button>
+
+            <aside class="cte-inspector">
+                <div class="cte-block__header">
+                    <h2>Referenced Objects</h2>
+                    <RadzenButton Icon="chevron_right"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  Size="ButtonSize.Small"
+                                  Click="@((MouseEventArgs _) => ToggleInspector())" />
+                </div>
+                <RadzenTabs @key="Session.OutputGeneration" class="cte-with-tabs" SelectedIndex="@SourceObjectTabIndex" Change="@OnSourceObjectTabChanged">
+                    <Tabs>
+                        @foreach (var cte in Session.TrimmedCtePanels)
+                        {
+                            <RadzenTabsItem @key="GetCteRenderKey(cte)" Text="@CteSelectionPresentationEditor.CteTabText(cte)">
+                                <div class="cte-with-panel @(cte.IsKept ? null : "cte-with-panel--removed")" @key="GetCteRenderKey(cte)">
+                                    @if (!cte.IsKept)
+                                    {
+                                        <div class="cte-removed-object-note">Removed from the new object.</div>
+                                    }
+                                    <div class="cte-reference-sql">
+                                        @foreach (var line in cte.Lines)
+                                        {
+                                            <div class="cte-reference-line @CteSelectionPresentationEditor.LineStateClass(line)">@line.Text</div>
+                                        }
+                                    </div>
+                                </div>
+                            </RadzenTabsItem>
+                        }
+                    </Tabs>
+                </RadzenTabs>
+            </aside>
+        }
+        else
+        {
+            <RadzenButton class="cte-inspector-toggle"
+                          Icon="chevron_left"
+                          Text="Objects"
+                          ButtonStyle="ButtonStyle.Light"
+                          Size="ButtonSize.Small"
+                          Click="@((MouseEventArgs _) => ToggleInspector())" />
+        }
+    </div>
+</section>
+
+@code {
+    private const string DefaultDatabaseName = "ExcedeSchema";
+    private const string DefaultDomainName = "Service";
+
+    private List<DatabaseDefinition> Databases { get; set; } = new();
+    private List<DatabaseDomainDefinition> Domains { get; set; } = new();
+    private List<DomainEditorViewItem> ComposedViews { get; set; } = new();
+
+    private int? SelectedDatabaseId { get; set; }
+    private string SelectedDomain { get; set; } = string.Empty;
+    private int? SelectedObjectId { get; set; }
+    private string InputSql { get; set; } = string.Empty;
+    private string LoadError { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+    private bool HasAppliedDefaults { get; set; }
+    private bool IsInspectorCollapsed { get; set; }
+    private string ActivePrimaryTab { get; set; } = "build";
+    private int SourceObjectTabIndex { get; set; }
+    private ElementReference ShapeLayoutRef { get; set; }
+    private CteSelectionSessionEditor Session { get; set; } = default!;
+    protected override async Task OnInitializedAsync()
+    {
+        Session = new CteSelectionSessionEditor(Parser);
+        Session.ClearForInputBoundary("Select a composed view to load its SQL projection surface.");
+        await LoadDatabasesAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await JSRuntime.InvokeVoidAsync("domainObjectEditorPanes.initialize", ShapeLayoutRef);
+    }
+
+    private async Task LoadDatabasesAsync()
+    {
+        IsBusy = true;
+        LoadError = string.Empty;
+
+        try
+        {
+            Databases = (await DatabaseRepository.GetAllAsync())
+                .Where(database => database.Active)
+                .OrderBy(database => database.DatabaseName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!HasAppliedDefaults)
+            {
+                await ApplyDefaultsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            NotifyFailure("Domain Object Editor load failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task OnDatabaseChanged(object? value)
+    {
+        SelectedDatabaseId = value is int id ? id : null;
+        SelectedDomain = string.Empty;
+        SelectedObjectId = null;
+        Domains.Clear();
+        ComposedViews.Clear();
+        ClearLoadedSql("Select a domain to load composed views.");
+
+        if (!SelectedDatabaseId.HasValue)
+        {
+            ClearLoadedSql("Select a database to begin.");
+            return;
+        }
+
+        await LoadDomainsAsync();
+    }
+
+    private async Task OnDomainChanged(object? value)
+    {
+        SelectedDomain = value?.ToString() ?? string.Empty;
+        SelectedObjectId = null;
+        await LoadComposedViewsAsync();
+    }
+
+    private async Task OnObjectChanged(object? value)
+    {
+        SelectedObjectId = value is int id ? id : null;
+        await ReloadSelectedViewSqlAsync();
+    }
+
+    private async Task LoadDomainsAsync()
+    {
+        if (!SelectedDatabaseId.HasValue)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        LoadError = string.Empty;
+
+        try
+        {
+            Domains = (await DatabaseDomainRepository.GetByDatabaseIdAsync(SelectedDatabaseId.Value))
+                .OrderBy(domain => domain.Domain, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            NotifyFailure("Domain load failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task LoadComposedViewsAsync()
+    {
+        ComposedViews.Clear();
+        ClearLoadedSql("Select a composed view to load its SQL.");
+
+        if (!SelectedDatabaseId.HasValue || string.IsNullOrWhiteSpace(SelectedDomain))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        LoadError = string.Empty;
+
+        try
+        {
+            var objects = await SchemaObjectRepository.GetByDatabaseAsync(SelectedDatabaseId.Value);
+            ComposedViews = objects
+                .Where(item => item.IsActive)
+                .Where(item => !item.IsBaseObject)
+                .Where(item => string.Equals(item.Domain ?? string.Empty, SelectedDomain, StringComparison.OrdinalIgnoreCase))
+                .Select(item => new DomainEditorViewItem(item))
+                .OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (ComposedViews.Count == 0)
+            {
+                ClearLoadedSql($"No composed views are registered for {SelectedDomain}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotifyFailure("Composed view load failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ReloadSelectedViewSqlAsync()
+    {
+        if (SelectedObjectId is null)
+        {
+            ClearLoadedSql("Select a composed view to load its SQL.");
+            return;
+        }
+
+        var selected = ComposedViews.FirstOrDefault(item => item.SchemaObjectId == SelectedObjectId.Value);
+        if (selected is null)
+        {
+            ClearLoadedSql("The selected composed view is no longer available.");
+            return;
+        }
+
+        IsBusy = true;
+        LoadError = string.Empty;
+
+        try
+        {
+            var databaseName = string.IsNullOrWhiteSpace(selected.Source.SourceDatabaseName)
+                ? Databases.FirstOrDefault(database => database.DatabaseId == SelectedDatabaseId)?.DatabaseName ?? string.Empty
+                : selected.Source.SourceDatabaseName!;
+
+            var definition = await ViewDefinitionRepository.GetViewDefinitionAsync(
+                databaseName,
+                selected.Source.SourceSchemaName,
+                selected.Source.SourceObjectName);
+
+            InputSql = definition?.Definition ?? string.Empty;
+            SourceObjectTabIndex = 0;
+            ActivePrimaryTab = "build";
+
+            if (string.IsNullOrWhiteSpace(InputSql))
+            {
+                ClearLoadedSql($"No SQL definition was found for {selected.DisplayName}.");
+                return;
+            }
+
+            Session.LoadSql(InputSql);
+            if (Session.ParseResult?.IsSuccess == true)
+            {
+                Session.SetStatus($"Loaded {selected.DisplayName} from {databaseName}.{selected.Source.SourceSchemaName}.{selected.Source.SourceObjectName}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            NotifyFailure("View SQL load failed", ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ApplyDefaultsAsync()
+    {
+        HasAppliedDefaults = true;
+
+        var defaultDatabase = Databases.FirstOrDefault(database =>
+            string.Equals(database.DatabaseName, DefaultDatabaseName, StringComparison.OrdinalIgnoreCase));
+        if (defaultDatabase is null)
+        {
+            return;
+        }
+
+        SelectedDatabaseId = defaultDatabase.DatabaseId;
+        await LoadDomainsAsync();
+
+        if (!Domains.Any(domain => string.Equals(domain.Domain, DefaultDomainName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        SelectedDomain = DefaultDomainName;
+        await LoadComposedViewsAsync();
+
+        var serviceWorkorder = ComposedViews.FirstOrDefault(item =>
+            item.Source.SourceObjectName.Contains("ServiceWorkorder", StringComparison.OrdinalIgnoreCase) ||
+            item.DisplayName.Contains("ServiceWorkorder", StringComparison.OrdinalIgnoreCase));
+        if (serviceWorkorder is not null)
+        {
+            SelectedObjectId = serviceWorkorder.SchemaObjectId;
+            await ReloadSelectedViewSqlAsync();
+        }
+    }
+
+    private void SelectPrimaryTab(string tab)
+    {
+        ActivePrimaryTab = tab;
+        if (tab is "result" or "result-cte")
+        {
+            Session.EnsureResultSql(tab);
+        }
+    }
+
+    private string PrimaryTabClass(string tab) =>
+        ActivePrimaryTab == tab ? "cte-primary-tab cte-primary-tab--active" : "cte-primary-tab";
+
+    private string OutputPaneClass =>
+        ActivePrimaryTab is "result" or "result-cte" or "source"
+            ? "cte-output-pane--single"
+            : string.Empty;
+
+    private void ValidateResultSql(string tab, string label)
+    {
+        var result = Parser.ValidateSql(Session.EnsureResultSql(tab));
+        Session.SetStatus(result.IsValid ? $"{label} validation passed." : $"{label} validation failed. {result.Message}");
+    }
+
+    private async Task CopySqlAsync(string tab, string label)
+    {
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", Session.EnsureResultSql(tab));
+        Session.SetStatus($"{label} copied.");
+    }
+
+    private void ToggleInspector() => IsInspectorCollapsed = !IsInspectorCollapsed;
+
+    private void OnSourceObjectTabChanged(int index) => SourceObjectTabIndex = index;
+
+    private void TogglePathSelection(CtePathRowEditor row)
+    {
+        Session.TogglePathSelection(row);
+        SelectReferencedObjectTab(row.ObjectName);
+    }
+
+    private void ToggleField(string key, bool isSelected)
+    {
+        Session.ToggleField(key, isSelected);
+        SelectReferencedObjectTab(GetObjectNameFromFieldKey(key));
+    }
+
+    private void SelectReferencedObjectTab(string objectName)
+    {
+        var index = Session.TrimmedCtePanels
+            .Select((cte, position) => new { cte.Name, Position = position })
+            .FirstOrDefault(item => string.Equals(item.Name, objectName, StringComparison.OrdinalIgnoreCase))
+            ?.Position;
+        if (index is not null)
+        {
+            SourceObjectTabIndex = index.Value;
+        }
+    }
+
+    private void ClearLoadedSql(string message)
+    {
+        InputSql = string.Empty;
+        Session.ClearForInputBoundary(message);
+        ActivePrimaryTab = "build";
+    }
+
+    private async Task OpenHelpAsync()
+    {
+        await DialogService.OpenAsync<HelpDialog>(
+            "Schema Studio Help Console",
+            new Dictionary<string, object?> { { "InitialSubjectId", "domain-object-editor" } },
+            new DialogOptions { Width = "1100px", Height = "760px", Resizable = true, Draggable = true });
+    }
+
+    private void NotifyFailure(string summary, Exception ex)
+    {
+        LoadError = ex.Message;
+        NotificationService.Notify(NotificationSeverity.Error, summary, ex.Message, 6000);
+    }
+
+    private string GetCteRenderKey(TrimmedCteDefinition cte) =>
+        $"{Session.RenderGeneration}:{Session.OutputGeneration}:{cte.Name}";
+
+    private static string GetObjectNameFromFieldKey(string key)
+    {
+        var separator = key.IndexOf('.', StringComparison.Ordinal);
+        return separator > 0 ? key[..separator] : string.Empty;
+    }
+
+    private sealed class DomainEditorViewItem
+    {
+        public DomainEditorViewItem(SchemaObjectDefinition source)
+        {
+            Source = source;
+        }
+
+        public SchemaObjectDefinition Source { get; }
+        public int SchemaObjectId => Source.SchemaObjectId;
+        public string DisplayName => string.IsNullOrWhiteSpace(Source.BusinessName)
+            ? $"{Source.SourceSchemaName}.{Source.SourceObjectName}"
+            : $"{Source.BusinessName} ({Source.SourceObjectName})";
+    }
+}

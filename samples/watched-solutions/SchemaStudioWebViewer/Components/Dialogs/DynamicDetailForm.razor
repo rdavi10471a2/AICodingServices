@@ -1,0 +1,110 @@
+﻿@using System.Reflection
+@using System.ComponentModel.DataAnnotations
+@using SchemaStudioWebViewer.Utils
+@using SchemaStudioWebViewer.Models
+
+@inject AttributeService Attr
+@inject TooltipService TooltipService
+
+<div Style="height: 80vh; min-height: 400px; resize: vertical; overflow: auto; background: #ffffff; border: 1px solid var(--rz-divider); border-radius: 4px;" class="rz-shadow-1">
+    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+        <tbody>
+            @foreach (var prop in GetVisibleProperties())
+            {
+                var lookupKey = $"{ModelType.Name}.{prop.Name}";
+                var displayName = Attr.GetName(lookupKey);
+                var description = Attr.GetDesc(lookupKey);
+                var value = prop.GetValue(Model);
+
+                var multilineAttr = prop.GetCustomAttribute<MultilineDisplayRequiredAttribute>();
+                var isMultiline = multilineAttr?.IsMultiline ?? ReflectionUtils.IsMultilineRequired(ModelType, prop.Name);
+                var initialHeight = multilineAttr?.InitialHeight ?? 160;
+
+                @if (isMultiline)
+                {
+                    <tr>
+                        <td colspan="2" style="padding: 12px 16px 4px 16px; background: #ffffff;">
+                            <div class="rz-display-flex rz-align-items-center">
+                                <RadzenText TextStyle="TextStyle.Overline"
+                                            Style="font-weight: 800; color: var(--rz-primary-darker);"
+                                            class="rz-m-0">@displayName</RadzenText>
+                                @if (!string.IsNullOrEmpty(description))
+                                {
+                                    <RadzenIcon Icon="help_outline"
+                                                Style="font-size: 14px; margin-left: 6px; cursor: help; color: var(--rz-primary);"
+                                                MouseEnter="@(args => TooltipService.Open(args, description))" />
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" style="padding: 0 16px 12px 16px;">
+                            <RadzenTextArea Value="@(value?.ToString())"
+                                            ReadOnly="true"
+                                            Style="@($"width: 100%; resize: none; border: var(--rz-input-border); min-height: {initialHeight}px; background: #fafafa; font-family: inherit;")" />
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr style="border-bottom: 1px solid #f9f9f9;">
+                        <td style="
+                                    width: 300px;
+                                    min-width: 300px;
+                                    max-width: 300px;
+                                    padding: 8px 16px;
+                                    vertical-align: middle;
+                                    background: #fcfcfc;
+                                    border-right: 1px solid #f0f0f0;">
+
+                            <div class="rz-display-flex rz-align-items-center">
+                                <RadzenText TextStyle="TextStyle.Overline"
+                                            Style="font-weight: 800; color: var(--rz-primary);"
+                                            class="rz-m-0">@displayName</RadzenText>
+                                @if (!string.IsNullOrEmpty(description))
+                                {
+                                    <RadzenIcon Icon="help_outline"
+                                                Style="font-size: 12px; margin-left: 4px; cursor: help; color: var(--rz-primary);"
+                                                MouseEnter="@(args => TooltipService.Open(args, description))" />
+                                }
+                            </div>
+                        </td>
+
+                        <td style="
+                                    width: auto;
+                                    padding: 4px 16px;
+                                    vertical-align: middle;">
+
+                            <RadzenTextBox Value="@(value?.ToString())"
+                                           ReadOnly="true"
+                                           Style="width: 100%; border: none; background: transparent; color: #333; font-size: 0.9rem;" />
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public object Model { get; set; } = default!;
+
+    private Type ModelType => Model.GetType();
+
+    private IEnumerable<PropertyInfo> GetVisibleProperties()
+    {
+        return ModelType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => new
+            {
+                Property = p,
+                Display = p.GetCustomAttribute<DisplayAttribute>(),
+                DetailOnly = p.GetCustomAttribute<DetailViewOnlyAttribute>()
+            })
+            .Where(x =>
+                x.Display != null &&
+                x.Display.GetAutoGenerateField() != false &&
+                (x.DetailOnly == null || x.DetailOnly.IsDetailOnly))
+            .OrderBy(x => x.Display?.GetOrder() ?? 99)
+            .Select(x => x.Property);
+    }
+}

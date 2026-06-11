@@ -1,0 +1,30 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/AICodingServices.Core/AICodingServices.Core.csproj" />
+    <Project Path="src/AICodingServices.Logging/AICodingServices.Logging.csproj" />
+    <Project Path="src/AICodingServices.MSBuild/AICodingServices.MSBuild.csproj" />
+    <Project Path="src/AICodingServices.Data/AICodingServices.Data.csproj" />
+    <Project Path="src/AICodingServices.Workflow/AICodingServices.Workflow.csproj" />
+    <Project Path="src/AICodingServices.Indexing/AICodingServices.Indexing.csproj" />
+    <Project Path="src/AICodingServices.Runtime/AICodingServices.Runtime.csproj" />
+    <Project Path="src/AICodingServices.Documentation/AICodingServices.Documentation.csproj" />
+    <Project Path="src/AICodingServices.McpServer/AICodingServices.McpServer.csproj" />
+    <Project Path="src/AICodingServices.McpStdioBridge/AICodingServices.McpStdioBridge.csproj" />
+    <Project Path="src/AICodingServices.McpHub/AICodingServices.McpHub.csproj" />
+  </Folder>
+  <Folder Name="/tests/unit/">
+    <Project Path="tests/unit/AICodingServices.Core.Tests/AICodingServices.Core.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.Logging.Tests/AICodingServices.Logging.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.MSBuild.Tests/AICodingServices.MSBuild.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.Data.Tests/AICodingServices.Data.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.Workflow.Tests/AICodingServices.Workflow.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.Indexing.Tests/AICodingServices.Indexing.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.Runtime.Tests/AICodingServices.Runtime.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/smoke/">
+    <Project Path="tests/smoke/AICodingServices.LanguageCorpusSmokeTests/AICodingServices.LanguageCorpusSmokeTests.csproj" />
+  </Folder>
+</Solution>

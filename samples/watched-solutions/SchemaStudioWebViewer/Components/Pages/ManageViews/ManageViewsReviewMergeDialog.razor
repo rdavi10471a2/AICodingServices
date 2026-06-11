@@ -1,0 +1,103 @@
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+
+@inject DialogService DialogService
+
+@attribute [FileVersion("1.0")]
+@attribute [AIFileContext("Components/Pages/ManageViews/ManageViewsReviewMergeDialog.razor", "Review dialog for Manage Views synchronization. This first-pass dialog focuses on added parser columns so new views can initialize child SchemaObjectColumn records without exposing full merge editing yet.", RelatedFiles = "Components/Pages/ManageViews/ManageViews.razor; Components/Pages/ManageViews/ManageViewsColumnReviewRow.cs", LastReviewed = "2026-04-24")]
+@attribute [AIChange("1.0", "2026-04-24 02:58 PM CDT added the first-pass review merge dialog so Manage Views can persist accepted added columns for a newly saved view.", AICommandStatus.Pending)]
+
+@* 2026-04-24 02:58 PM CDT AI v1.0 review-merge-dialog marker: this first-pass dialog reviews added columns only so a saved parent view can initialize child column records. *@
+@* Fragment References:
+   - None. Leaf dialog styled by Components/Pages/ManageViews/ManageViewsReviewMergeDialog.razor.css.
+*@
+
+<div class="manage-views-merge-dialog">
+    <div class="manage-views-merge-dialog__title">Review Merge</div>
+    <p class="manage-views-merge-dialog__copy">
+        Added parser columns can be saved into Schema Studio now. Changed and removed items stay for the later merge pass.
+    </p>
+
+    @if (WorkingRows.Count == 0)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat">
+            No added parser columns are waiting to be initialized for @ViewDisplayName.
+        </RadzenAlert>
+    }
+    else
+    {
+        <RadzenDataGrid Data="@WorkingRows"
+                        TItem="ManageViewsColumnReviewRow"
+                        AllowPaging="false"
+                        AllowSorting="true"
+                        AllowFiltering="false"
+                        Density="Density.Compact"
+                        class="manage-views-merge-dialog__grid">
+            <Columns>
+                <RadzenDataGridColumn TItem="ManageViewsColumnReviewRow" Width="84px" Sortable="false" Filterable="false">
+                    <HeaderTemplate>
+                        Accept
+                    </HeaderTemplate>
+                    <Template Context="row">
+                        <RadzenCheckBox @bind-Value="@row.AcceptMerge" TValue="bool" />
+                    </Template>
+                </RadzenDataGridColumn>
+
+                <RadzenDataGridColumn TItem="ManageViewsColumnReviewRow" Property="ColumnName" Title="Column" Width="220px" />
+                <RadzenDataGridColumn TItem="ManageViewsColumnReviewRow" Property="ChangeSummary" Title="Summary" Width="260px" />
+                <RadzenDataGridColumn TItem="ManageViewsColumnReviewRow" Property="ParsedPreview" Title="Parsed Values" />
+            </Columns>
+        </RadzenDataGrid>
+    }
+
+    <div class="manage-views-merge-dialog__actions">
+        <RadzenButton Text="Cancel"
+                      ButtonStyle="ButtonStyle.Light"
+                      Click="@Cancel" />
+        <RadzenButton Text="Save Added Columns"
+                      Icon="save"
+                      Disabled="@(WorkingRows.Count == 0 || !WorkingRows.Any(x => x.AcceptMerge))"
+                      Click="@Save" />
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string ViewDisplayName { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<ManageViewsColumnReviewRow> Rows { get; set; } = Array.Empty<ManageViewsColumnReviewRow>();
+
+    private List<ManageViewsColumnReviewRow> WorkingRows { get; set; } = new();
+
+    protected override void OnParametersSet()
+    {
+        WorkingRows = Rows
+            .Where(x => string.Equals(x.Status, "Added", StringComparison.Ordinal))
+            .Select(x => new ManageViewsColumnReviewRow
+            {
+                ColumnName = x.ColumnName,
+                Status = x.Status,
+                ChangeSummary = x.ChangeSummary,
+                ParsedPreview = x.ParsedPreview,
+                ExistingPreview = x.ExistingPreview,
+                AcceptMerge = x.AcceptMerge
+            })
+            .ToList();
+    }
+
+    private void Cancel()
+    {
+        DialogService.Close(null);
+    }
+
+    private void Save()
+    {
+        DialogService.Close(
+            WorkingRows
+                .Where(x => x.AcceptMerge)
+                .Select(x => x.ColumnName)
+                .ToList());
+    }
+}

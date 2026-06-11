@@ -1,0 +1,45 @@
+@page "/about"
+@using SchemaStudio.AIHelpers
+
+@attribute [FileVersion("1.2")]
+@attribute [AIFileContext("Components/Pages/About.razor", "Provides a compact About page for SUSStudio with the app logo, product identity, and positioning statement used by the top Help menu About action.")]
+
+<PageTitle>About SUSStudio</PageTitle>
+
+<section class="about-page">
+    <div class="about-logo-card">
+        <img src="images/susstudio-about-logo.png"
+             alt="SUSStudio -- Schema Understanding Service"
+             class="about-logo" />
+    </div>
+</section>
+
+<style>
+    .about-page {
+        min-height: 100%;
+        padding: 1.25rem;
+        background: #f4f6f9;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .about-logo-card {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: min(92vw, 540px);
+        padding: 1.25rem;
+        border: 1px solid #d6dce7;
+        border-radius: 6px;
+        background: #ffffff;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    .about-logo {
+        display: block;
+        width: min(100%, 480px);
+        height: auto;
+    }
+</style>

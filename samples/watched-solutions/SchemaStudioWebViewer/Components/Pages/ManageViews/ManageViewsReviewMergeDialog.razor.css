@@ -1,0 +1,30 @@
+/* 2026-04-24 02:58 PM CDT AI marker: first-pass review merge dialog styling keeps the added-column initializer readable without pulling merge editing back into the main page. */
+
+.manage-views-merge-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.manage-views-merge-dialog__title {
+    color: var(--rz-primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.manage-views-merge-dialog__copy {
+    margin: 0;
+    color: #5c677d;
+}
+
+.manage-views-merge-dialog__grid {
+    max-height: 460px;
+    overflow: auto;
+}
+
+.manage-views-merge-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}

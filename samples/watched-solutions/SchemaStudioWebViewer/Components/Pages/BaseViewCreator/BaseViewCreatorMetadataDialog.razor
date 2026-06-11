@@ -1,0 +1,81 @@
+@using Radzen
+@using SchemaStudio.AIHelpers
+
+@namespace SchemaStudioWebViewer.Components.Pages.BaseViewCreator
+
+@attribute [FileVersion("1.0")]
+@attribute [AIFileContext(
+    "Components/Pages/BaseViewCreator/BaseViewCreatorMetadataDialog.razor",
+    "Small edit dialog for Base View Creator generated-column metadata.",
+    Responsibilities = "Render editable business name and description fields while the parent page owns the target column/relationship and validation outcome.",
+    RelatedFiles = "Components/Pages/BaseViewCreator/BaseViewCreator.razor; Components/Pages/BaseViewCreator/BaseViewCreator.Metadata.cs",
+    LastReviewed = "2026-05-12")]
+
+<div class="bvg-modal-backdrop">
+    <section class="bvg-modal" role="dialog" aria-modal="true" aria-labelledby="bvg-metadata-dialog-title">
+        <header class="bvg-modal-header">
+            <h2 id="bvg-metadata-dialog-title">@Title</h2>
+            <button type="button" class="bvg-icon-button" @onclick="OnCancel" aria-label="Close metadata editor">x</button>
+        </header>
+        <div class="bvg-modal-body">
+            <div class="bvg-modal-field">
+                <div class="bvg-modal-field-header">
+                    @BusinessNameLabel
+                    <span class="bvg-character-count">@EditBusinessName.Length / @BusinessNameMaxLength</span>
+                </div>
+                <RadzenTextBox @bind-Value="@EditBusinessName"
+                               MaxLength="@BusinessNameMaxLength"
+                               Style="width:100%;"
+                               Placeholder="Business label for this generated column" />
+            </div>
+            <div class="bvg-modal-field bvg-modal-field-wide">
+                <div class="bvg-modal-field-header">
+                    @BusinessDescriptionLabel
+                    <span class="bvg-character-count">@EditBusinessDescription.Length / @BusinessDescriptionMaxLength</span>
+                </div>
+                <RadzenTextArea @bind-Value="@EditBusinessDescription"
+                                MaxLength="@BusinessDescriptionMaxLength"
+                                Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:auto;"
+                                class="bvg-metadata-textarea"
+                                Placeholder="Business-facing description for this generated column" />
+            </div>
+        </div>
+        <footer class="bvg-modal-actions">
+            <button type="button" class="bvg-button secondary" @onclick="OnCancel">Cancel</button>
+            <button type="button" class="bvg-button primary" @onclick="ApplyAsync">Apply</button>
+        </footer>
+    </section>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string BusinessName { get; set; } = "";
+    [Parameter] public string BusinessDescription { get; set; } = "";
+    [Parameter] public int BusinessNameMaxLength { get; set; }
+    [Parameter] public int BusinessDescriptionMaxLength { get; set; }
+    [Parameter] public RenderFragment? BusinessNameLabel { get; set; }
+    [Parameter] public RenderFragment? BusinessDescriptionLabel { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback<BaseViewCreatorMetadataEditResult> OnApply { get; set; }
+
+    private string EditBusinessName = "";
+    private string EditBusinessDescription = "";
+    private string LastBusinessName = "";
+    private string LastBusinessDescription = "";
+
+    protected override void OnParametersSet()
+    {
+        if (BusinessName == LastBusinessName && BusinessDescription == LastBusinessDescription)
+        {
+            return;
+        }
+
+        LastBusinessName = BusinessName;
+        LastBusinessDescription = BusinessDescription;
+        EditBusinessName = BusinessName;
+        EditBusinessDescription = BusinessDescription;
+    }
+
+    private Task ApplyAsync() =>
+        OnApply.InvokeAsync(new BaseViewCreatorMetadataEditResult(EditBusinessName, EditBusinessDescription));
+}

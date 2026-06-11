@@ -1,0 +1,653 @@
+@page "/manage-views"
+@page "/manage-views-next"
+
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudioWebViewer.Components.ColumnReconciliation
+@using SchemaStudio.Data.Models
+@using SchemaStudio.Data.Repositories
+@using SchemaStudioWebViewer.Components.Dialogs
+@using SchemaStudioWebViewer.Components.Pages.ManageViews
+@using SchemaStudioWebViewer.Utils
+@using SchemaStudioWebViewer.WEBSemanticModel.Model
+@using SchemaStudioWebViewer.WEBSemanticModel.Services
+
+@inject DatabaseRepository DatabaseRepository
+@inject DatabaseDomainRepository DatabaseDomainRepository
+@inject SchemaObjectRepository SchemaObjectRepository
+@inject SchemaObjectColumnRepository SchemaObjectColumnRepository
+@inject SourceViewRepository SourceViewRepository
+@inject ViewParsingService ParserService
+@inject NotificationService NotificationService
+@inject TooltipService TooltipService
+@inject DialogService DialogService
+@inject SqlObjectDependencyRepository SqlObjectDependencyRepository
+
+@attribute [FileVersion("1.49")]
+@attribute [AIChange(
+    "1.36",
+    "2026-04-30 11:59 PM CDT disabled selector controls during busy operations and rebuilt the column synchronization summary after merge choices are staged.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.35",
+    "2026-04-30 11:28 PM CDT promoted the Manage Views Next surface in visible navigation by removing Next from the page title while the route name remains unchanged for now.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.34",
+    "2026-04-30 11:15 PM CDT changed the merge-review dialog title to include the current view name so the modal carries context without repeating the generic dialog heading.",
+    AICommandStatus.Pending)]
+@attribute [AIChange("1.33", "2026-05-01 10:43 PM CDT moved the column synchronization summary under the view title and made Review Merge a normal selected-view toolbar button.", AICommandStatus.Pending)]
+@attribute [AIChange("1.32", "2026-05-01 10:28 PM CDT moved the header Column Synchronization strip into the same toolbar grid as the view action buttons so it wraps with them when the selector is visible.", AICommandStatus.Pending)]
+@attribute [AIChange("1.31", "2026-05-01 10:19 PM CDT moved Column Synchronization into the selected-view header so View Definition loses the bottom merge block and starts shorter.", AICommandStatus.Pending)]
+@attribute [AIChange("1.30", "2026-05-01 10:15 PM CDT moved Delete View to the far-right toolbar position so the destructive action follows normal button ordering convention.", AICommandStatus.Pending)]
+@attribute [AIChange("1.29", "2026-05-01 09:58 PM CDT wrapped the selected-view toolbar in a boundary shell so CSS can keep responsive action buttons inside the header card.", AICommandStatus.Pending)]
+@attribute [AIChange("1.28", "2026-05-01 09:49 PM CDT replaced the selected-view RadzenStack toolbar with a plain responsive button container and shortened Save All Changes to Save All for stable narrow-width layout.", AICommandStatus.Pending)]
+@attribute [AIChange("1.27", "2026-05-01 08:42 PM CDT wired Manage Views Next Review Merge to the focused ColumnMergeReviewDialog while leaving final persistence on Save All Changes.", AICommandStatus.Pending)]
+@attribute [AIChange("1.26", "2026-04-30 06:09 PM CDT refreshed the Manage Views Next primary file context header to document the accepted prototype layout and split-file ownership model.", AICommandStatus.Pending)]
+@attribute [AIChange("1.25", "2026-04-30 05:59 PM CDT raised Manage Views Next view and column description/notes textareas to a 100px readable minimum height while preserving vertical resize.", AICommandStatus.Pending)]
+@attribute [AIChange("1.24", "2026-04-30 05:13 PM CDT made the Manage Views Next column selector panel share the selected-column editor row height so the listbox grows with its parent while still scrolling.", AICommandStatus.Pending)]
+@attribute [AIChange("1.23", "2026-04-30 05:07 PM CDT moved the Manage Views Next height constraint from the whole editor row to the column selector listbox so textareas can grow parent cards after load.", AICommandStatus.Pending)]
+@attribute [AIChange("1.22", "2026-04-30 04:59 PM CDT bounded the Manage Views Next editor grid itself so Column Metadata cannot expand the page and its column list scrolls inside the card.", AICommandStatus.Pending)]
+@attribute [AIChange("1.21", "2026-04-30 04:51 PM CDT made the Manage Views Next Column Metadata editor follow the shared editor row height so its list and detail panels scroll within the parent.", AICommandStatus.Pending)]
+@attribute [AIChange("1.20", "2026-04-30 04:43 PM CDT capped the Manage Views Next Column Metadata editor to the viewport budget so the column list and detail panel scroll internally instead of stretching the page.", AICommandStatus.Pending)]
+@attribute [AIChange("1.19", "2026-04-30 04:39 PM CDT moved textarea width and vertical-resize constraints onto the RadzenTextArea inline styles so the browser applies them to the rendered textarea.", AICommandStatus.Pending)]
+@attribute [AIChange("1.18", "2026-04-30 04:30 PM CDT made the column selector row markup explicit so hiding ordinals cannot hide or displace editable column fields.", AICommandStatus.Pending)]
+@attribute [AIChange("1.17", "2026-04-30 04:20 PM CDT made the Column Metadata card own a viewport-aware vertical budget so its list and editor children stretch inside the parent without overflow.", AICommandStatus.Pending)]
+@attribute [AIChange("1.16", "2026-04-30 04:13 PM CDT removed visible ordinals from the Manage Views Next column selector while preserving ordinal ordering.", AICommandStatus.Pending)]
+@attribute [AIChange("1.15", "2026-04-30 04:11 PM CDT made Manage Views Next multiline metadata boxes show vertical scrollbars by default while preserving vertical resize.", AICommandStatus.Pending)]
+@attribute [AIChange("1.14", "2026-04-30 04:09 PM CDT moved Disable Inheritance above column business metadata and removed its blue container treatment while keeping the checkbox target visible.", AICommandStatus.Pending)]
+@attribute [AIChange("1.13", "2026-04-30 04:03 PM CDT hardened textarea resize constraints against Radzen-rendered elements and darkened the Disable Inheritance checkbox target.", AICommandStatus.Pending)]
+@attribute [AIChange("1.12", "2026-04-30 03:53 PM CDT constrained Manage Views Next textarea resizing to the card width and made Disable Inheritance visually prominent in the column editor.", AICommandStatus.Pending)]
+@attribute [AIChange("1.11", "2026-04-30 03:39 PM CDT simplified the column selector rows to column names only so the listbox can show more choices without business-name previews.", AICommandStatus.Pending)]
+@attribute [AIChange("1.10", "2026-04-30 03:37 PM CDT moved parsed refresh to the selected-view toolbar, returned reset to the view editor, and forced Unknown selector groups to render flat.", AICommandStatus.Pending)]
+@attribute [AIChange("1.9", "2026-04-30 03:19 PM CDT flattened the Unknown domain in the view selector so unclassified views appear directly under Unknown without base/composed subfolders.", AICommandStatus.Pending)]
+@attribute [AIChange("1.8", "2026-04-30 03:13 PM CDT bounded the view selector rail so the tree scrolls internally and the reload-databases action stays visible.", AICommandStatus.Pending)]
+@attribute [AIChange("1.7", "2026-04-30 03:09 PM CDT clarified view action buttons with explicit labels and mouseover text so reset, refresh, SQL, and save behavior is less ambiguous.", AICommandStatus.Pending)]
+@attribute [AIChange("1.6", "2026-04-30 03:09 PM CDT relaxed the prototype editor layout so resized textareas grow their cards and the bounded page scrolls while the column selector remains a fixed-height listbox.", AICommandStatus.Pending)]
+@attribute [AIChange("1.5", "2026-04-30 03:02 PM CDT moved object-level view tools into the selected-view header as compact toolbar actions while leaving refresh near the view workflow.", AICommandStatus.Pending)]
+@attribute [AIChange("1.4", "2026-04-30 02:59 PM CDT reduced the selector rail and made column metadata a true fixed-height scroll surface so resizing note fields cannot push the page past its viewport.", AICommandStatus.Pending)]
+@attribute [AIChange("1.3", "2026-04-30 02:55 PM CDT fixed the column metadata panels to a local listbox-style height so saved columns scroll inside the selector instead of stretching the page.", AICommandStatus.Pending)]
+@attribute [AIChange("1.2", "2026-04-30 02:49 PM CDT moved column synchronization into the view-definition pane and tightened the prototype shell so column editing keeps the main vertical space.", AICommandStatus.Pending)]
+@attribute [AIChange("1.1", "2026-04-30 04:17 PM CDT tightened the prototype page for a bounded app-height shell and forced selector/tree regions to scroll inside the page.", AICommandStatus.Pending)]
+@attribute [AIFileContext("Components/Pages/ManageViewsNext/ManageViewsNext.razor", "Prototype Manage Views replacement page that keeps the existing ManageViews page intact while testing the accepted one-screen domain/tree selector, combined view-definition and column-metadata editing layout, relocated selected-view toolbar actions, column reconciliation launch, and shared save/delete workflow.", Responsibilities = "Owns the /manage-views-next route, top-level markup, selector shell, view editor markup, column metadata editor markup, focused reconciliation dialog launch, and composition of the partial-class workflow helpers.", Nuances = "The class-level FileVersion lives here; other ManageViewsNext partial files should use AIChange and AIFileContext without duplicating FileVersion. Keep the old ManageViews folder as fallback until this surface is accepted.", RelatedFiles = "ManageViewsNext.razor.cs; ManageViewsNext.Selection.cs; ManageViewsNext.Columns.cs; ManageViewsNext.Parser.cs; ManageViewsNext.razor.css; Components/ColumnReconciliation/ColumnReconciliationDialog.razor; README.md", LastReviewed = "2026-05-03")]
+@attribute [AIChange("1.0", "2026-04-30 03:37 PM CDT added a side-by-side Manage Views prototype route with a scrollable domain tree selector and combined edit surface so the existing page remains untouched for fallback testing.", AICommandStatus.Pending)]
+
+@* 2026-05-01 10:43 PM CDT AI v1.33 manage-views-next marker: sync summary sits under the view title and Review Merge is a regular toolbar action. *@
+@* 2026-05-01 10:28 PM CDT AI v1.32 manage-views-next marker: Column Synchronization now shares the selected-view toolbar grid with the action buttons. *@
+@* 2026-05-01 10:19 PM CDT AI v1.31 manage-views-next marker: Column Synchronization now lives in the selected-view header instead of the View Definition footer. *@
+@* 2026-05-01 10:15 PM CDT AI v1.30 manage-views-next marker: Delete View now sits at the far right of the selected-view toolbar. *@
+@* 2026-05-01 09:58 PM CDT AI v1.29 manage-views-next marker: selected-view toolbar now has an outer boundary shell so responsive button wrapping stays inside the header card. *@
+@* 2026-05-01 09:49 PM CDT AI v1.28 manage-views-next marker: selected-view toolbar uses a plain CSS-owned button container so narrow viewports wrap predictably. *@
+@* 2026-05-01 08:42 PM CDT AI v1.27 manage-views-next marker: Review Merge now opens the focused dialog and stages merge choices for the main Save All Changes flow. *@
+@* 2026-04-30 06:09 PM CDT AI v1.26 manage-views-next marker: primary file context now documents route ownership, split-file responsibilities, and fallback-page boundaries. *@
+@* 2026-04-30 05:13 PM CDT AI v1.24 manage-views-next marker: column selector and selected-column editor now share row height, so the listbox grows with its parent. *@
+@* 2026-04-30 05:07 PM CDT AI v1.23 manage-views-next marker: only the column selector listbox is height-bounded; metadata textareas can grow their cards after load. *@
+@* 2026-04-30 04:59 PM CDT AI v1.22 manage-views-next marker: editor grid height is bounded so Column Metadata cannot stretch the page and column rows scroll locally. *@
+@* 2026-04-30 04:51 PM CDT AI v1.21 manage-views-next marker: Column Metadata now uses the shared editor-row parent height and scrolls internally. *@
+@* 2026-04-30 04:43 PM CDT AI v1.20 manage-views-next marker: Column Metadata is viewport-capped and its list/detail children scroll internally. *@
+@* 2026-04-30 05:59 PM CDT AI v1.25 manage-views-next marker: view and column description/notes textareas load at a 100px readable minimum and remain vertically resizable. *@
+@* 2026-04-30 04:39 PM CDT AI v1.19 manage-views-next marker: textarea constraints are inline on RadzenTextArea so horizontal resize cannot escape the card. *@
+@* 2026-04-30 04:30 PM CDT AI v1.18 manage-views-next marker: column selector rows use explicit name/status regions so editable fields stay visible. *@
+@* 2026-04-30 04:20 PM CDT AI v1.17 manage-views-next marker: Column Metadata now stretches its child panels within a viewport-aware parent height. *@
+@* 2026-04-30 04:13 PM CDT AI v1.16 manage-views-next marker: column selector rows rely on sort order instead of showing ordinals. *@
+@* 2026-04-30 04:11 PM CDT AI v1.15 manage-views-next marker: multiline metadata textareas show vertical scrollbars by default while retaining vertical resize. *@
+@* 2026-04-30 04:09 PM CDT AI v1.14 manage-views-next marker: Disable Inheritance now appears before business fields without the blue container box. *@
+@* 2026-04-30 04:03 PM CDT AI v1.13 manage-views-next marker: Radzen textarea internals are width-bound and the Disable Inheritance checkbox target has a darker border. *@
+@* 2026-04-30 03:53 PM CDT AI v1.12 manage-views-next marker: textareas resize only vertically inside their cards and Disable Inheritance gets a visible checkbox row. *@
+@* 2026-04-30 03:39 PM CDT AI v1.11 manage-views-next marker: column selector rows show only the projected column name plus edit status to keep the listbox compact. *@
+@* 2026-04-30 03:37 PM CDT AI v1.10 manage-views-next marker: parsed refresh is a selected-view toolbar action, reset lives with edit fields, and Unknown groups are flat. *@
+@* 2026-04-30 03:19 PM CDT AI v1.9 manage-views-next marker: Unknown domain renders as one flat unclassified bucket instead of splitting into base/composed folders. *@
+@* 2026-04-30 03:13 PM CDT AI v1.8 manage-views-next marker: selector rail is viewport-bounded so long domain trees cannot push Reload Databases off screen. *@
+@* 2026-04-30 03:09 PM CDT AI v1.7 manage-views-next marker: view action buttons now expose clearer labels and hover text for reset, refresh, SQL, and save behavior. *@
+@* 2026-04-30 03:09 PM CDT AI v1.6 manage-views-next marker: editor cards can grow inside the bounded page scroll while the column selector keeps a fixed listbox scroll. *@
+@* 2026-04-30 03:02 PM CDT AI v1.5 manage-views-next marker: object-level tools moved to the selected-view header so edit panes stay focused on editable fields. *@
+@* 2026-04-30 02:59 PM CDT AI v1.4 manage-views-next marker: selector rail is narrower and column metadata is a fixed scroll surface even when textareas are resized. *@
+@* 2026-04-30 02:55 PM CDT AI v1.3 manage-views-next marker: column metadata now uses fixed local panel heights so the selector scrolls like a listbox. *@
+@* 2026-04-30 02:49 PM CDT AI v1.2 manage-views-next marker: synchronization now lives in the compact view-definition pane so the column editor owns the remaining workspace height. *@
+@* 2026-04-30 04:17 PM CDT AI v1.1 manage-views-next marker: page layout now expects the shared app shell to be viewport-bounded and keeps tree/list scrolling local. *@
+@* 2026-04-30 03:37 PM CDT AI v1.0 manage-views-next marker: prototype page lives beside the existing Manage Views surface without replacing it. *@
+@* Fragment References:
+   - Components/Pages/ManageViewsNext/ManageViewsNext.razor.cs
+   - Components/Pages/ManageViewsNext/ManageViewsNext.Selection.cs
+   - Components/Pages/ManageViewsNext/ManageViewsNext.Parser.cs
+   - Components/Pages/ManageViewsNext/ManageViewsNext.Columns.cs
+   - Components/Pages/ManageViewsNext/ManageViewsNext.razor.css
+*@
+
+<PageTitle>Manage Views</PageTitle>
+
+<RadzenStack Gap="0.3rem"
+             class="@ManageViewsNextClass"
+             Style="@PaneResizeStyle"
+             @onpointermove="@ResizePane"
+             @onpointerup="@EndPaneResize">
+    <div class="mvn-page-header">
+        <h1 class="mvn-page-title">Manage Views</h1>
+        <RadzenButton Text="@(IsLeftPanelHidden ? "Show View Selector" : "Hide View Selector")"
+                      Icon="@(IsLeftPanelHidden ? "right_panel_open" : "left_panel_close")"
+                      ButtonStyle="ButtonStyle.Light"
+                      Click="@ToggleLeftPanel" />
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(LoadError))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">
+            @LoadError
+        </RadzenAlert>
+    }
+
+    @if (IsBusy)
+    {
+        <div class="mvn-busy-overlay" role="status" aria-live="polite">
+            <div class="mvn-busy-card">
+                <span class="mvn-busy-spinner" aria-hidden="true"></span>
+                <span>Loading view workspace</span>
+            </div>
+        </div>
+    }
+
+    <div class="@(IsLeftPanelHidden ? "mvn-shell mvn-shell-collapsed" : "mvn-shell")">
+        @if (!IsLeftPanelHidden)
+        {
+            <aside class="mvn-selector-panel"
+                   style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+                <div class="mvn-selector-header" style="flex:0 0 auto;">
+                    <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">View Selector</RadzenText>
+                    <RadzenButton Text="Reload"
+                                  Icon="refresh"
+                                  ButtonStyle="ButtonStyle.Light"
+                                  title="Refreshes database choices, domains, imported views, and available candidates."
+                                  Click="@ReloadDatabasesAsync"
+                                  Disabled="@IsBusy"
+                                  class="mvn-selector-reload-button" />
+                </div>
+
+                <div class="mvn-selector-filters" style="flex:0 0 auto;">
+                    <div class="mvn-field">
+                        @FieldLabel(typeof(DatabaseDefinition), nameof(DatabaseDefinition.DatabaseName))
+                        <RadzenDropDown Data="@Databases"
+                                        TextProperty="DatabaseName"
+                                        ValueProperty="DatabaseId"
+                                        @bind-Value="@SelectedDatabaseId"
+                                        Change="@OnDatabaseChanged"
+                                        Disabled="@IsBusy"
+                                        Style="width:100%;"
+                                        Placeholder="Database" />
+                    </div>
+
+                    <div class="mvn-field">
+                        @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.Domain))
+                        <RadzenDropDown Data="@LeftFilterDomains"
+                                        TextProperty="Domain"
+                                        ValueProperty="Domain"
+                                        @bind-Value="@SelectedDomainFilter"
+                                        Change="@OnDomainFilterChanged"
+                                        Disabled="@IsBusy"
+                                        Style="width:100%;"
+                                        AllowClear="true"
+                                        Placeholder="All Domains" />
+                    </div>
+                </div>
+
+                <div class="mvn-tree-scroll"
+                     style="flex:1 1 auto; min-height:0; overflow:auto; overflow-x:hidden;"
+                     role="tree"
+                     aria-label="Views grouped by domain and type">
+                    @foreach (var group in DomainTreeGroups)
+                    {
+                        <details class="mvn-tree-domain">
+                            <summary>
+                                <RadzenIcon Icon="database" />
+                                <span>@group.Domain</span>
+                            </summary>
+
+                            @if (IsUnknownDomain(group.Domain))
+                            {
+                                @if (group.AllViews.Count == 0)
+                                {
+                                    <div class="mvn-tree-empty">No unclassified views</div>
+                                }
+                                else
+                                {
+                                    @foreach (var item in group.AllViews)
+                                    {
+                                        <button type="button"
+                                                class="@GetTreeItemClass(item)"
+                                                title="@item.Subtitle"
+                                                disabled="@IsBusy"
+                                                @onclick="@(() => OnViewSelectionChanged(item.SelectionKey))">
+                                            <RadzenIcon Icon="table_view" />
+                                            <span>@item.DisplayName</span>
+                                        </button>
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                <details class="mvn-tree-folder">
+                                    <summary>
+                                        <RadzenIcon Icon="folder" />
+                                        <span>Base Views</span>
+                                    </summary>
+                                    @if (group.BaseViews.Count == 0)
+                                    {
+                                        <div class="mvn-tree-empty">No base views</div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var item in group.BaseViews)
+                                        {
+                                            <button type="button"
+                                                    class="@GetTreeItemClass(item)"
+                                                    title="@item.Subtitle"
+                                                    disabled="@IsBusy"
+                                                    @onclick="@(() => OnViewSelectionChanged(item.SelectionKey))">
+                                                <RadzenIcon Icon="table_view" />
+                                                <span>@item.DisplayName</span>
+                                            </button>
+                                        }
+                                    }
+                                </details>
+
+                                <details class="mvn-tree-folder">
+                                    <summary>
+                                        <RadzenIcon Icon="folder" />
+                                        <span>Composed Views</span>
+                                    </summary>
+                                    @if (group.ComposedViews.Count == 0)
+                                    {
+                                        <div class="mvn-tree-empty">No composed views</div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var item in group.ComposedViews)
+                                        {
+                                            <button type="button"
+                                                    class="@GetTreeItemClass(item)"
+                                                    title="@item.Subtitle"
+                                                    disabled="@IsBusy"
+                                                    @onclick="@(() => OnViewSelectionChanged(item.SelectionKey))">
+                                                <RadzenIcon Icon="table_view" />
+                                                <span>@item.DisplayName</span>
+                                            </button>
+                                        }
+                                    }
+                                </details>
+                            }
+                        </details>
+                    }
+
+                    <details class="mvn-tree-domain">
+                        <summary>
+                            <RadzenIcon Icon="playlist_add" />
+                            <span>Available Views</span>
+                        </summary>
+                        @if (AvailableViewItems.Count == 0)
+                        {
+                            <div class="mvn-tree-empty">No available views</div>
+                        }
+                        else
+                        {
+                            @foreach (var item in AvailableViewItems)
+                            {
+                                <button type="button"
+                                        class="@GetTreeItemClass(item)"
+                                        title="@item.Subtitle"
+                                        disabled="@IsBusy"
+                                        @onclick="@(() => OnViewSelectionChanged(item.SelectionKey))">
+                                    <RadzenIcon Icon="table_view" />
+                                    <span>@item.DisplayName</span>
+                                </button>
+                            }
+                        }
+                    </details>
+                </div>
+
+                <button type="button"
+                        class="mvn-height-resize-handle"
+                        title="Resize view selector height"
+                        aria-label="Resize view selector height"
+                        @onpointerdown="@(args => BeginPaneResize(ResizeTarget.SelectorHeight, args))"></button>
+            </aside>
+            <button type="button"
+                    class="mvn-resize-handle mvn-shell-resize-handle"
+                    title="Resize view selector"
+                    aria-label="Resize view selector"
+                    @onpointerdown="@(args => BeginPaneResize(ResizeTarget.Selector, args))"></button>
+        }
+
+        <main class="mvn-workspace">
+            @if (SelectedViewItem == null || EditableObject == null)
+            {
+                <div class="mvn-card mvn-placeholder">
+                    Select a view on the left to add or edit it.
+                </div>
+            }
+            else
+            {
+                <section class="mvn-card mvn-selected-header">
+                    <div class="mvn-title-block">
+                        <div class="mvn-title-row">
+                            <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">@SelectedViewItem.DisplayName</RadzenText>
+                            <span class="mvn-status-chip">@SelectedViewClassification</span>
+                        </div>
+                        <RadzenText TextStyle="TextStyle.Caption" class="mvn-source-name">@CurrentSourceFullName</RadzenText>
+                        <div class="mvn-title-sync-counts">
+                            <span>Column Synchronization</span>
+                            <span>@ColumnSummarySentence</span>
+                        </div>
+                    </div>
+
+                </section>
+
+                <div class="mvn-editor-grid">
+                    <section class="mvn-card mvn-view-editor">
+                        <div class="mvn-panel-header">
+                            <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">View Definition</RadzenText>
+                            <div class="mvn-view-tools">
+                                <button type="button"
+                                        class="mvn-view-tools-trigger"
+                                        title="Open view-level tools"
+                                        aria-expanded="@IsViewToolsOpen"
+                                        @onclick="@ToggleViewTools">
+                                    <RadzenIcon Icon="build" />
+                                    <span>View Tools</span>
+                                </button>
+                                @if (IsViewToolsOpen)
+                                {
+                                    <div class="mvn-view-tools-menu">
+                                        <button type="button"
+                                                title="Review parser-detected column changes before applying synchronization decisions."
+                                                disabled="@IsBusy"
+                                                @onclick="@(() => RunViewToolAsync(OpenColumnMergeReviewAsync))">
+                                            <RadzenIcon Icon="published_with_changes" />
+                                            <span>Review Merge</span>
+                                        </button>
+                                        <button type="button"
+                                                title="Reload this view's SQL from the database, clear parser cache for it, and rebuild the column synchronization review."
+                                                disabled="@(!CanOpenDependencyTools || IsBusy)"
+                                                @onclick="@(() => RunViewToolAsync(RefreshCurrentViewAsync))">
+                                            <RadzenIcon Icon="sync" />
+                                            <span>Refresh Parsed View</span>
+                                        </button>
+                                        <button type="button"
+                                                title="Open the parser's view of this SQL view, including parsed columns, source chain, and the view SQL tab."
+                                                disabled="@(!CanOpenDependencyTools || IsBusy)"
+                                                @onclick="@(() => RunViewToolAsync(ShowParsedDependenciesAsync))">
+                                            <RadzenIcon Icon="table_view" />
+                                            <span>Parsed Details</span>
+                                        </button>
+                                        <button type="button"
+                                                title="Show SQL Server dependency metadata for objects that reference this view."
+                                                disabled="@(!CanOpenDependencyTools || IsBusy)"
+                                                @onclick="@(() => RunViewToolAsync(ShowWhereUsedAsync))">
+                                            <RadzenIcon Icon="device_hub" />
+                                            <span>Where Used</span>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="mvn-field">
+                            @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.BusinessName))
+                            <RadzenTextBox @bind-Value="@EditableObject.BusinessName" Style="width:100%;" MaxLength="128" />
+                        </div>
+
+                        <div class="mvn-view-definition-row">
+                            <div class="mvn-field">
+                                @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.Domain))
+                                <RadzenDropDown Data="@Domains"
+                                                TextProperty="Domain"
+                                                ValueProperty="Domain"
+                                                @bind-Value="@EditableObject.Domain"
+                                                Style="width:100%;"
+                                                AllowClear="true"
+                                                Placeholder="Unknown" />
+                            </div>
+
+                            <label class="mvn-check-field">
+                                @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.IsBaseObject))
+                                <RadzenCheckBox Value="@EditableObject.IsBaseObject" Change="@OnBaseObjectChanged" TValue="bool" />
+                            </label>
+                        </div>
+
+                        <div class="mvn-field">
+                            @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.SourceTableName))
+                            <RadzenTextBox @bind-Value="@EditableObject.SourceTableName"
+                                           Style="width:100%;"
+                                           Placeholder="Required for base objects"
+                                           Disabled="@(!EditableObject.IsBaseObject)"
+                                           MaxLength="128" />
+                        </div>
+
+                        <div class="mvn-field">
+                            @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.BusinessDescription))
+                            <RadzenTextArea @bind-Value="@EditableObject.BusinessDescription"
+                                            Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;"
+                                            class="mvn-textarea"
+                                            MaxLength="500" />
+                        </div>
+
+                        <div class="mvn-field">
+                            @FieldLabel(typeof(SchemaObjectDefinition), nameof(SchemaObjectDefinition.DeveloperNotes))
+                            <RadzenTextArea @bind-Value="@EditableObject.DeveloperNotes"
+                                            Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;"
+                                            class="mvn-textarea"
+                                            MaxLength="3200" />
+                        </div>
+
+                        <div class="mvn-view-actions">
+                            <RadzenButton Text="Reset View Edits"
+                                          Icon="restart_alt"
+                                          ButtonStyle="ButtonStyle.Light"
+                                          title="Discard unsaved edits for this view definition and reload its last saved values."
+                                          Click="@ResetEditorAsync"
+                                          Disabled="@IsBusy" />
+                            <RadzenButton Text="Save All"
+                                          Icon="save"
+                                          title="Save the view definition and all edited column metadata together."
+                                          Click="@SaveViewAsync"
+                                          Disabled="@IsBusy" />
+                            @if (IsSaving)
+                            {
+                                <span class="mvn-save-spinner" role="status" aria-live="polite">
+                                    <span class="mvn-save-spinner-dot" aria-hidden="true"></span>
+                                    <span>Saving</span>
+                                </span>
+                            }
+                            @if (CanDeleteCurrentView)
+                            {
+                                <RadzenButton Text="Delete View"
+                                              Icon="delete"
+                                              ButtonStyle="ButtonStyle.Danger"
+                                              title="Delete this imported Schema Studio view definition and its saved columns."
+                                              Click="@DeleteViewAsync"
+                                              Disabled="@IsBusy" />
+                            }
+                        </div>
+                    </section>
+                    <button type="button"
+                            class="mvn-resize-handle mvn-editor-resize-handle"
+                            title="Resize view definition"
+                            aria-label="Resize view definition"
+                            @onpointerdown="@(args => BeginPaneResize(ResizeTarget.ViewDefinition, args))"></button>
+
+                    <section class="mvn-card mvn-column-editor">
+                        <div class="mvn-panel-header">
+                            <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">Column Metadata</RadzenText>
+                        </div>
+
+                        @if (CanEditColumns && SavedColumns.Count > 0)
+                        {
+                            <div class="mvn-column-grid">
+                                <div class="mvn-column-list-panel">
+                                    <div class="mvn-column-list-header">
+                                        <span>Columns (@FilteredColumns.Count)</span>
+                                        @MetadataHelp(nameof(SchemaObjectColumnDefinition.SourceColumnName))
+                                    </div>
+                                    <RadzenTextBox @bind-Value="@ColumnFilter"
+                                                   Placeholder="Filter columns"
+                                                   Style="width:100%;"
+                                                   Change="@(_ => EnsureSelectedColumn())" />
+
+                                    <div class="mvn-column-list">
+                                        @foreach (var column in FilteredColumns)
+                                        {
+                                            <button type="button"
+                                                    class="@GetColumnSelectorClass(column)"
+                                                    title="@BuildColumnTooltip(column)"
+                                                    @onclick="@(() => SelectColumn(column))">
+                                                <span class="mvn-column-labels">
+                                                    <strong>@column.SourceColumnName</strong>
+                                                </span>
+                                                @if (column.MergeState != SchemaObjectColumnMergeState.None)
+                                                {
+                                                    <span class="@GetColumnStateChipClass(column)">@GetColumnStateChipText(column)</span>
+                                                }
+                                                else if (column.IsDirty)
+                                                {
+                                                    <span class="mvn-edited-chip">Edited</span>
+                                                }
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                                <button type="button"
+                                        class="mvn-resize-handle mvn-column-list-resize-handle"
+                                        title="Resize column list"
+                                        aria-label="Resize column list"
+                                        @onpointerdown="@(args => BeginPaneResize(ResizeTarget.ColumnList, args))"></button>
+
+                                <div class="mvn-column-detail-panel">
+                                    <div class="mvn-column-detail-header">
+                                        <div>
+                                            <span class="mvn-detail-label">Selected Column</span>
+                                            <div class="mvn-selected-column-title">
+                                                <h3>@(SelectedColumn?.SourceColumnName ?? "No column selected")</h3>
+                                                @if (SelectedColumnMetadataIsInherited)
+                                                {
+                                                    <span class="mvn-origin-chip inherited">Inherited</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <RadzenButton Text="Reset Column Changes"
+                                                      Icon="restart_alt"
+                                                      Size="ButtonSize.Small"
+                                                      ButtonStyle="ButtonStyle.Light"
+                                                      Click="@ResetSelectedColumnAsync"
+                                                      Disabled="@(SelectedColumn == null || !SelectedColumn.IsDirty || IsBusy)" />
+                                    </div>
+
+                                    @if (SelectedColumn == null)
+                                    {
+                                        <div class="mvn-column-empty">Select a saved column to edit its business metadata.</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="mvn-column-fields">
+                                            @if (!string.IsNullOrWhiteSpace(SelectedColumnInheritedFrom))
+                                            {
+                                                <div class="mvn-inherited-source">
+                                                    <span>Inherited from</span>
+                                                    <strong>@SelectedColumnInheritedFrom</strong>
+                                                </div>
+                                            }
+
+                                            <label class="mvn-check-field mvn-inheritance-check">
+                                                @ColumnFieldLabel(nameof(SchemaObjectColumnDefinition.DisableInheritance))
+                                                <RadzenCheckBox @bind-Value="@SelectedColumn.DisableInheritance"
+                                                                TValue="bool"
+                                                                Disabled="@(!CanEditSelectedColumnMetadata)" />
+                                            </label>
+
+                                            <div class="mvn-field">
+                                                @ColumnFieldLabel(nameof(SchemaObjectColumnDefinition.BusinessName))
+                                                <RadzenTextBox @bind-Value="@SelectedColumn.BusinessName"
+                                                               MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.BusinessName))"
+                                                               Style="width:100%;"
+                                                               ReadOnly="@(!CanEditSelectedColumnMetadata)" />
+                                            </div>
+
+                                            <div class="mvn-field">
+                                                @ColumnFieldLabel(nameof(SchemaObjectColumnDefinition.BusinessDescription))
+                                                <RadzenTextArea @bind-Value="@SelectedColumn.BusinessDescription"
+                                                                MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.BusinessDescription))"
+                                                                Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;"
+                                                                class="mvn-textarea"
+                                                                ReadOnly="@(!CanEditSelectedColumnMetadata)" />
+                                            </div>
+
+                                            <div class="mvn-field">
+                                                @ColumnFieldLabel(nameof(SchemaObjectColumnDefinition.DeveloperNotes))
+                                                <RadzenTextArea @bind-Value="@SelectedColumn.DeveloperNotes"
+                                                                MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.DeveloperNotes))"
+                                                                Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;"
+                                                                class="mvn-textarea"
+                                                                ReadOnly="@(!CanEditSelectedColumnMetadata)" />
+                                            </div>
+
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </section>
+                </div>
+
+            }
+        </main>
+    </div>
+</RadzenStack>
+
+@code {
+    private async Task OpenColumnMergeReviewAsync()
+    {
+        if (EditableObject == null || SelectedViewItem == null)
+        {
+            return;
+        }
+
+        if (EditableObject.SchemaObjectId <= 0)
+        {
+            NotificationService.Notify(NotificationSeverity.Warning, "Save view first", "Save the view definition before reviewing column metadata merge choices.", 3500);
+            return;
+        }
+
+        if (CurrentParsedView == null)
+        {
+            NotificationService.Notify(NotificationSeverity.Info, "No parser result", "Refresh the parsed view before reviewing column metadata merge choices.", 3000);
+            return;
+        }
+
+        var result = await DialogService.OpenAsync<ColumnReconciliationDialog>(
+            $"{SelectedViewItem.DisplayName} - Column Merge Review",
+            new Dictionary<string, object?>
+            {
+                { "ViewDisplayName", SelectedViewItem.DisplayName },
+                { "IsBaseView", EditableObject.IsBaseObject },
+                { "SchemaObjectId", EditableObject.SchemaObjectId },
+                { "ParsedView", CurrentParsedView },
+                { "ParsedColumns", CurrentParsedView.Columns },
+                { "SavedColumns", SavedColumns }
+            },
+            new DialogOptions
+            {
+                Width = "90vw",
+                Height = "90vh",
+                Resizable = true,
+                Draggable = false,
+                CloseDialogOnOverlayClick = false
+            });
+
+        if (result is true)
+        {
+            var parsedColumns = CurrentParsedView.Columns.ToViewColumnDtos();
+            ReviewRows = BuildColumnReviewRows(parsedColumns, SavedColumns, EditableObject.IsBaseObject).ToList();
+            EnsureSelectedColumn();
+            NotificationService.Notify(NotificationSeverity.Success, "Merge applied", "Column merge choices were staged. Use Save All Changes to commit them.", 3000);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

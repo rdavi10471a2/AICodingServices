@@ -1,0 +1,344 @@
+﻿[
+    {
+        "Id":  "system-overview",
+        "Title":  "General Overview",
+        "Subtitle":  "System Description",
+        "Icon":  "info",
+        "Details":  [
+                        {
+                            "Id":  "about",
+                            "Label":  "What is Schema Studio?",
+                            "Subtitle":  "Enterprise Data Catalog",
+                            "Description":  "Schema Studio is a centralized metadata repository designed to bridge the gap between technical SQL definitions and business logic. It provides a searchable interface for exploring views, conformed dimensions, and data lineages across the entire organization\u0027s data landscape.",
+                            "Icon":  "hub",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "purpose",
+                            "Label":  "Core Purpose",
+                            "Subtitle":  "Self-Service Discovery",
+                            "Description":  "The system is built to allow analysts and developers to quickly identify the correct data sources for financial reporting and data modeling without needing direct access to underlying SQL Server instances.",
+                            "Icon":  "center_focus_strong",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "explore",
+        "Title":  "Explorer Guide",
+        "Subtitle":  "Systems \u0026 Navigation",
+        "Icon":  "explore",
+        "Details":  [
+                        {
+                            "Id":  "databases",
+                            "Label":  "Database Directory",
+                            "Subtitle":  "System Inventory",
+                            "Description":  "The directory below lists every source system currently connected to Schema Studio. You can see the technical identifier used in SQL vs. the friendly business name.",
+                            "Icon":  "storage",
+                            "CustomFragmentName":  "DatabaseGrid"
+                        },
+                        {
+                            "Id":  "steps",
+                            "Label":  "How to Search",
+                            "Subtitle":  "3-Step Navigation",
+                            "Description":  "Follow the top-down dropdown sequence: \n1. Select a Database source. \n2. Choose a Business Domain (e.g., Sales, Finance). \n3. Select the specific View you wish to inspect.\n\nThe column grid below the selection will update automatically.",
+                            "Icon":  "help_center",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "technical",
+        "Title":  "Technical Info",
+        "Subtitle":  "SQL \u0026 Metadata",
+        "Icon":  "code",
+        "Details":  [
+                        {
+                            "Id":  "sql",
+                            "Label":  "SQL Definitions",
+                            "Subtitle":  "T-SQL Source",
+                            "Description":  "Each view is built on a T-SQL script. Click the \u0027SQL\u0027 button on the view header to view the full source code, including joins and business logic.",
+                            "Icon":  "terminal",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "meta",
+                            "Label":  "Column Metadata",
+                            "Subtitle":  "Extended Attributes",
+                            "Description":  "The grid displays business-friendly names by default. To see data types, precision, and physical column constraints, double-click any row in the columns table.",
+                            "Icon":  "settings_ethernet",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "view-details",
+        "Title":  "View Details",
+        "Subtitle":  "Columns, semantic source, physical lineage, and SQL",
+        "Icon":  "account_tree",
+        "Details":  [
+                        {
+                            "Id":  "what-this-shows",
+                            "Label":  "What View Details Shows",
+                            "Section":  "Overview",
+                            "Subtitle":  "Exploded view definition",
+                            "Description":  "View Details expands a selected view into the columns it projects, the source objects used in its FROM/JOIN section, and the SQL text behind the selected view.\n\nUse this dialog when you need to answer two questions at the same time: what does this view expose, and where did each projected column come from?",
+                            "Icon":  "schema",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "semantic-source",
+                            "Label":  "Inherited / Semantic Source",
+                            "Section":  "Column Meaning",
+                            "Subtitle":  "Where business meaning comes from",
+                            "Description":  "Inherited, or Semantic Source, identifies the object and column that provide the business meaning for the selected view column.\n\nThis is the metadata authority for Business Name, Business Description, and related documentation when inheritance is allowed.\n\nA semantic source may be an immediate semantic view rather than the physical table. That is intentional: the view where a lookup, role, or renamed business concept is first defined owns that meaning.",
+                            "Icon":  "psychology",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "physical-lineage",
+                            "Label":  "Physical Lineage",
+                            "Section":  "Column Meaning",
+                            "Subtitle":  "Where the data value comes from",
+                            "Description":  "Physical Lineage identifies the lowest resolved database, schema, object, and column that supply the actual data value.\n\nThis is the technical path back to the source system column. It is useful for audits, impact checks, and proving where a value originates.\n\nPhysical lineage does not by itself prove business meaning. The same physical column can mean different things when joined multiple times under different roles.",
+                            "Icon":  "device_hub",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "same-values",
+                            "Label":  "When They Are the Same",
+                            "Section":  "How to Interpret the Values",
+                            "Subtitle":  "Direct pass-through",
+                            "Description":  "When Semantic Source and Physical Lineage are the same, the column is effectively passing straight through from the same source object and column that owns its meaning.\n\nThis is common for base objects and simple columns where no intermediate semantic view changed the role, business name, lookup expansion, or interpretation.",
+                            "Icon":  "compare_arrows",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "different-values",
+                            "Label":  "When They Are Different",
+                            "Section":  "How to Interpret the Values",
+                            "Subtitle":  "Meaning was defined above the physical source",
+                            "Description":  "When Semantic Source and Physical Lineage are different, the data value physically came from one place, but its business meaning was defined somewhere else in the semantic view chain.\n\nThis is expected for lookup expansions, role-specific joins, calculated columns, renamed outputs, and composed integration views.\n\nExample: an employee name may physically come from COEMP.Name, but a service view may define whether that name means Writer, Reviewer, Salesperson, or Ticket Employee. The semantic source carries that role-specific meaning.",
+                            "Icon":  "alt_route",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "disable-inheritance",
+                            "Label":  "When Inheritance Is Disabled",
+                            "Section":  "Author Overrides",
+                            "Subtitle":  "Meaning is intentionally defined here",
+                            "Description":  "If inheritance is disabled for a column, the view author is saying the upstream metadata should not overwrite this column\u0027s business meaning.\n\nUse this when the same physical source is joined more than once under different roles, or when the projected column needs its own business name and description at this view level.",
+                            "Icon":  "block",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "column-reconciliation",
+        "Title":  "Column Reconciliation",
+        "Subtitle":  "Review parser changes against saved column metadata",
+        "Icon":  "published_with_changes",
+        "Details":  [
+                        {
+                            "Id":  "purpose",
+                            "Label":  "What This Dialog Does",
+                            "Section":  "Overview",
+                            "Subtitle":  "Parser result compared to saved metadata",
+                            "Description":  "Column Reconciliation compares the current parser result for a view with the column metadata currently saved in Schema Studio.\n\nUse it after refreshing or adding a view to decide how parser-owned structure and business metadata should be staged before saving.",
+                            "Icon":  "compare_arrows",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "current-parsed-values",
+                            "Label":  "Current Parsed Values",
+                            "Section":  "Business Values",
+                            "Subtitle":  "Values read from the live SQL definition",
+                            "Description":  "Current Parsed Values come from annotations found during the current parser run.\n\nIf a current parsed business value is blank, the SQL did not declare a local business name or description for that projected column. For composed or integration views, this can be expected because meaning may be inherited from a semantic source.",
+                            "Icon":  "data_object",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "saved-value-origin",
+                            "Label":  "Saved Value Origin",
+                            "Section":  "Business Values",
+                            "Subtitle":  "Declared, inherited, or local override",
+                            "Description":  "Saved business values are labeled by origin so the comparison is not misleading.\n\nDeclared values belong to a base definition. Inherited saved values belong to a non-base view where inheritance is allowed, and are populated by semantic inheritance. Local override values belong to a non-base view where inheritance is disabled.\n\nThis uses existing view and column state; no extra database field is required.",
+                            "Icon":  "account_tree",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "keep-vs-accept",
+                            "Label":  "Keep Saved vs Accept Parsed",
+                            "Section":  "Merge Choice",
+                            "Subtitle":  "Which business values survive",
+                            "Description":  "Keep Saved preserves the saved business name, description, and inheritance setting. If the saved values are inherited, this keeps the inherited semantic meaning.\n\nAccept New Parsed Values replaces saved business values with values from the current parse. Use this when the SQL annotations are the intended new local meaning.\n\nParser-owned source mapping is refreshed from the current parse when Apply Merge is used; it is informational and is not a business-value choice.",
+                            "Icon":  "rule",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "is-base-definition",
+                            "Label":  "Base Definition Hygiene",
+                            "Section":  "Merge Choice",
+                            "Subtitle":  "How base-definition state is staged",
+                            "Description":  "During reconciliation, a base view stages its columns as base definitions. A non-base view stages its columns as non-base definitions.\n\nThat keeps integration and composed view columns from being mistaken for the authority that declared the business meaning.",
+                            "Icon":  "verified",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "domain-object-modeler",
+        "Title":  "Domain Object Modeler",
+        "Subtitle":  "Compose editable domain object surfaces from base views",
+        "Icon":  "hub",
+        "Details":  [
+                        {
+                            "Id":  "purpose",
+                            "Label":  "What This Page Does",
+                            "Section":  "Overview",
+                            "Subtitle":  "Base views into an editable object surface",
+                            "Description":  "Domain Object Modeler composes selected managed base views from one domain into a single CREATE OR ALTER VIEW statement. The generated view becomes the editable object surface used by downstream domain object editing and projection workflows.",
+                            "Icon":  "account_tree",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "anchor",
+                            "Label":  "Anchor Base View",
+                            "Section":  "Workflow",
+                            "Subtitle":  "The final FROM source",
+                            "Description":  "Choose one selected base view as the anchor. The anchor determines the final FROM clause for the composed view. Selection order does not matter; changing the anchor changes the root CTE used by the final SELECT.",
+                            "Icon":  "radio_button_checked",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "aliases",
+                            "Label":  "Base View Output Names",
+                            "Section":  "Workflow",
+                            "Subtitle":  "CTE aliases for selected base views",
+                            "Description":  "Each selected base view receives an editable output name. These names become the CTE aliases used in the generated SQL and in the join editor.",
+                            "Icon":  "drive_file_rename_outline",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "joins",
+                            "Label":  "Join Requirements",
+                            "Section":  "Workflow",
+                            "Subtitle":  "One join per non-anchor CTE",
+                            "Description":  "Every selected non-anchor base view must have a join type and ON clause before SQL can be generated. The page inserts those structured join rows after the anchor FROM clause.",
+                            "Icon":  "merge_type",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "remove-comments",
+                            "Label":  "Remove Comments",
+                            "Section":  "SQL Output",
+                            "Subtitle":  "Strip internal source annotations",
+                            "Description":  "Remove Comments regenerates the composed SQL using source view definitions with internal annotation comments stripped through the existing read-only view definition repository cleanup function.",
+                            "Icon":  "comments_disabled",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "validate-copy",
+                            "Label":  "Generate, Validate, Copy",
+                            "Section":  "SQL Output",
+                            "Subtitle":  "Work from current settings",
+                            "Description":  "Generate builds SQL from the current selected base views, anchor, aliases, join rows, and comment-stripping setting. Validate runs the generated SQL through the parser. Copy places the current generated SQL on the clipboard.",
+                            "Icon":  "rule",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "domain-object-editor",
+        "Title":  "Domain Object Editor",
+        "Subtitle":  "Project fields and paths from a composed view",
+        "Icon":  "edit_square",
+        "Details":  [
+                        {
+                            "Id":  "selection",
+                            "Label":  "Composed View Selection",
+                            "Section":  "Workflow",
+                            "Subtitle":  "Database, domain, composed view",
+                            "Description":  "Choose a database and domain, then select a composed managed view. Base views are intentionally excluded because this editor shapes the editable object surface produced by the modeler.",
+                            "Icon":  "view_column",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "graph-editing",
+                            "Label":  "Graph Editing",
+                            "Section":  "Workflow",
+                            "Subtitle":  "Selection without re-authoring SQL",
+                            "Description":  "The selected view definition supplies static SQL text for the local parser. After loading, the page manipulates the parsed CTE graph by toggling output fields and object paths.",
+                            "Icon":  "account_tree",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "results",
+                            "Label":  "Generated Results",
+                            "Section":  "SQL Output",
+                            "Subtitle":  "Trimmed SQL outputs",
+                            "Description":  "Result SQL and Result SQL CTE generate trimmed projections from the current graph state. Validate checks the generated SQL with ScriptDom and Copy places the current result on the clipboard.",
+                            "Icon":  "rule",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "base-view-creator",
+        "Title":  "Base View Creator",
+        "Subtitle":  "Base view generation with isolated new plumbing",
+        "Icon":  "account_tree",
+        "Details":  [
+                        {
+                            "Id":  "purpose",
+                            "Label":  "What This Page Does",
+                            "Section":  "Overview",
+                            "Subtitle":  "Base view creation workflow",
+                            "Description":  "Base View Creator builds base-view SQL from source table metadata, relationship discovery, lookup display choices, and projection settings.\n\nUse it as the active base-view creation workflow before composing broader domain objects.",
+                            "Icon":  "schema",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "relationship-plumbing",
+                            "Label":  "Relationship Plumbing",
+                            "Section":  "Workflow",
+                            "Subtitle":  "Selection and dependency model",
+                            "Description":  "The page keeps base columns, lookup projections, join dependencies, and metadata defaults coordinated so lookup display choices can generate the required SQL joins without forcing unrelated FK projection changes.",
+                            "Icon":  "account_tree",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    },
+    {
+        "Id":  "manage-databases",
+        "Title":  "Manage Databases",
+        "Subtitle":  "Database and domain maintenance",
+        "Icon":  "database",
+        "Details":  [
+                        {
+                            "Id":  "database-records",
+                            "Label":  "Database Records",
+                            "Subtitle":  "Section: database identity and business context",
+                            "Description":  "Use the Database tab to maintain one catalog record per source database.\n\nDatabase Name is the physical SQL Server database name used by metadata imports and dependency checks.\n\nDefault Schema is used when source object metadata does not provide a schema. For most SQL Server sources this remains dbo.\n\nBusiness Name and Business Description are required because they are the user-facing context shown in Schema Studio.\n\nDeveloper Notes are optional technical notes for maintainers.",
+                            "Icon":  "storage",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "domain-records",
+                            "Label":  "Domain Records",
+                            "Subtitle":  "Section: business grouping inside a database",
+                            "Description":  "Use the Domains tab to group source objects into functional areas such as Service, Accounting, Parts, Payroll, or Shared.\n\nDomain names are unique within the selected database. The page checks for duplicates case-insensitively before saving.\n\nDeleting a domain is intentionally not available here because existing object records can still carry that domain value outside a database-enforced relationship.",
+                            "Icon":  "category",
+                            "CustomFragmentName":  ""
+                        },
+                        {
+                            "Id":  "delete-database",
+                            "Label":  "Deleting Databases",
+                            "Subtitle":  "Section: cascade behavior",
+                            "Description":  "Deleting a database record removes the database from Schema Studio metadata maintenance.\n\nThe database constraints also delete child domain and object records tied to that database. Use this only when the catalog record and its imported metadata should be removed together.",
+                            "Icon":  "delete",
+                            "CustomFragmentName":  ""
+                        }
+                    ]
+    }
+]

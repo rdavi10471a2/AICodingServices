@@ -1,0 +1,495 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@using Microsoft.AspNetCore.Components.Routing
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudioWebViewer.Configuration
+@using SchemaStudioWebViewer.Components.HelpSystem
+@inject NavigationManager NavigationManager
+@inject DialogService DialogService
+@inject IJSRuntime JSRuntime
+
+@attribute [FileVersion("1.28")]
+@attribute [AIChange(
+    "1.14",
+    "2026-05-01 09:20 AM CDT replaced native details menus with explicit Blazor menu state so commands close dropdowns and navigate without route flicker.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.13",
+    "2026-05-01 09:14 AM CDT changed the authenticated top menu to a two-row header with Radzen icons instead of letter glyphs.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.12",
+    "2026-05-01 09:03 AM CDT made the top menu react to simple-auth changes so it appears after login without depending on route timing.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.11",
+    "2026-05-01 08:47 AM CDT made the app header and top menu plain CSS-owned markup so navigation chrome does not depend on Radzen stack/icon styling during initial load.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.10",
+    "2026-05-01 08:38 AM CDT made the top application menu depend only on kiosk chrome suppression so login state no longer leaves normal pages without navigation.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.9",
+    "2026-05-01 08:33 AM CDT replaced the hamburger/sidebar navigation with a kiosk-aware top menu for Schema Explorer, Maintenance, and Help actions.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.8",
+    "2026-04-30 11:10 PM CDT collapsed the duplicated shared body gutters so page surfaces start closer to the app chrome while preserving the bounded scroll host.",
+    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.7",
+    "2026-04-30 10:58 PM CDT flattened the shared body wrapper and tightened the application header so pages do not inherit an extra framed shell or oversized app bar.",
+    AICommandStatus.Pending)]
+@attribute [AIChange("1.6", "2026-04-30 03:09 PM CDT restored scrolling on the bounded content card so pages can grow internally while still staying inside the viewport shell.", AICommandStatus.Pending)]
+@attribute [AIChange("1.5", "2026-04-30 02:49 PM CDT tightened the shared Radzen body shell so page content stays inside the viewport card and feature pages own their internal scroll regions.", AICommandStatus.Pending)]
+@attribute [AIChange("1.4", "2026-04-30 04:17 PM CDT bounded the shared layout body to viewport-relative height so pages can use internal scrolling instead of growing past the visible app shell.", AICommandStatus.Pending)]
+@attribute [AIChange("1.3", "2026-04-27 11:36 AM CDT added a login-required toast when the guarded hamburger is clicked before the temporary session login is complete.", AICommandStatus.Pending)]
+@attribute [AIChange("1.2", "2026-04-27 11:32 AM CDT gated the layout hamburger and sidebar menu behind the temporary session auth flag so direct Home navigation cannot expose navigation before login.", AICommandStatus.Pending)]
+@attribute [AIFileContext("Components/Layout/MainLayout.razor", "Hosts the shared Radzen application shell, top menu chrome, dialog providers, and kiosk chrome suppression while Home owns temporary simple-auth content gating.")]
+@attribute [AIChange("1.1", "2026-04-22 06:04 PM CDT kept Radzen dialog providers in the page circuit so DialogService calls render shared dialogs.", AICommandStatus.Pending)]
+@attribute [AIChange("1.0", "2026-04-22 11:06 AM CDT added config-driven kiosk chrome suppression for the /kiosk route.", AICommandStatus.Pending)]
+
+<RadzenComponents />
+
+<style>
+    :root {
+        --rz-layout-body-background: #f4f6f9;
+    }
+
+    /* Kill the rainbow gradient */
+    .rz-layout, .rz-body {
+        background-image: none !important;
+        background-color: #f4f6f9 !important;
+    }
+
+    .rz-layout {
+        overflow: hidden !important;
+    }
+
+    .rz-body {
+        height: 100% !important;
+        max-height: 100% !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
+        padding: 0.55rem 0.75rem !important;
+        box-sizing: border-box;
+    }
+
+        /* Keep the viewport-bounded scroll host without adding a second visual page frame. */
+        .rz-body > .rz-p-4 {
+            background-color: transparent !important;
+            height: 100%;
+            max-height: 100%;
+            min-height: 0;
+            overflow: auto;
+            box-sizing: border-box;
+            padding: 0 !important;
+            border-radius: 0;
+            margin: 0;
+            box-shadow: none;
+            border: 0;
+        }
+
+    .kiosk-shell .rz-body > .rz-p-4 {
+        height: 100vh;
+        max-height: 100vh;
+        min-height: 0;
+    }
+
+    .rz-header {
+        min-height: 72px !important;
+        height: 72px !important;
+    }
+
+    .app-header {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.2rem;
+        min-height: 72px;
+        height: 72px;
+        width: 100%;
+        padding: 0.3rem 0.7rem 0.35rem;
+        border-bottom: 1px solid #d8dde6;
+        background: #ffffff;
+        box-sizing: border-box;
+    }
+
+    .app-title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-height: 24px;
+    }
+
+    .app-logo-mark {
+        width: 42px;
+        height: 32px;
+        border: 1px solid #cdd6e4;
+        border-radius: 4px;
+        background: #0b1220;
+        object-fit: contain;
+    }
+
+    .app-title {
+        white-space: nowrap;
+        font-size: 1.05rem;
+        font-weight: 700;
+        line-height: 1.2;
+        color: #20242c;
+    }
+
+    .app-menu {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        min-height: 34px;
+        font-size: 0.82rem;
+        font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .app-menu a,
+    .app-menu button,
+    .app-menu summary {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-height: 30px;
+        padding: 0.3rem 0.65rem;
+        border: 0;
+        border-radius: 4px;
+        background: #e7e9ee;
+        color: #20242c;
+        font: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .app-menu .rz-icon {
+        font-size: 1.05rem;
+        line-height: 1;
+    }
+
+    .app-menu a:hover,
+    .app-menu button:hover,
+    .app-menu summary:hover,
+    .app-menu details[open] > summary {
+        background: #eef1f6;
+    }
+
+    .app-menu details {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .app-menu-trigger {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .app-menu-trigger > button[aria-expanded="true"] {
+        background: #eef1f6;
+    }
+
+    .app-menu summary {
+        list-style: none;
+    }
+
+    .app-menu summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .app-menu-popover {
+        position: absolute;
+        top: calc(100% + 2px);
+        left: 0;
+        z-index: 20;
+        min-width: 190px;
+        padding: 0.3rem;
+        border: 1px solid #d6dce7;
+        border-radius: 6px;
+        background: #ffffff;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+    }
+
+    .app-menu-popover a,
+    .app-menu-popover button {
+        width: 100%;
+        justify-content: flex-start;
+        background: transparent;
+    }
+
+    /* Utility to fix your alignment frustration */
+    .align-header {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+    }
+</style>
+
+<RadzenLayout Class="@LayoutClass" Style="@LayoutStyle">
+    @* 2026-04-30 03:09 PM CDT AI v1.6 layout-height marker: the bounded white content card scrolls again when a page legitimately grows inside the viewport. *@
+    @* 2026-04-30 02:49 PM CDT AI v1.5 layout-height marker: Radzen body scrolling is suppressed so bounded pages do not escape the viewport card. *@
+    @* 2026-04-30 04:17 PM CDT AI v1.4 layout-height marker: page content is viewport-bounded so feature pages can own local scroll regions. *@
+    @* 2026-04-22 06:04 PM CDT AI v1.1 dialog-provider marker: RadzenComponents stays in the active page circuit so dialogs, notifications, tooltips, and context menus share the caller's services. *@
+    @* 2026-04-22 11:06 AM CDT AI v1.0 kiosk layout marker: config can hide navigation chrome for /kiosk while Home remains the shared content surface. *@
+    @if (!HideNavigationChrome)
+    {
+        <RadzenHeader>
+            <div class="app-header">
+                <div class="app-title-row">
+                    <img src="images/susstudio-app-mark-title.png"
+                         alt=""
+                         class="app-logo-mark" />
+                    <div class="app-title">SUSStudio -- Schema Understanding Service</div>
+                </div>
+                @if (CanShowNavigationMenu)
+                {
+                    <nav class="app-menu" aria-label="Application menu">
+                        <button type="button" @onclick="@NavigateToSchemaExplorerAsync">
+                            <RadzenIcon Icon="travel_explore" />
+                            <span>Schema Explorer</span>
+                        </button>
+
+                        <div class="app-menu-trigger">
+                            <button type="button"
+                                    aria-expanded="@(openMenu == "maintenance")"
+                                    @onclick="@(() => ToggleMenu("maintenance"))">
+                                <RadzenIcon Icon="build" />
+                                <span>Maintenance</span>
+                            </button>
+                            @if (openMenu == "maintenance")
+                            {
+                                <div class="app-menu-popover">
+                                    <button type="button" @onclick="@(() => NavigateToAsync("manage-databases"))">
+                                        <RadzenIcon Icon="database" />
+                                        <span>Configure Databases</span>
+                                    </button>
+                                    <button type="button" @onclick="@(() => NavigateToAsync("manage-views"))">
+                                        <RadzenIcon Icon="view_column" />
+                                        <span>Manage Views</span>
+                                    </button>
+                                    <button type="button" @onclick="@(() => NavigateToAsync("base-view-creator"))">
+                                        <RadzenIcon Icon="account_tree" />
+                                        <span>Create Base Views</span>
+                                    </button>
+                                    <button type="button" @onclick="@(() => NavigateToAsync("domain-object-modeler"))">
+                                        <RadzenIcon Icon="hub" />
+                                        <span>Compose Domain Objects</span>
+                                    </button>
+                                    <button type="button" @onclick="@(() => NavigateToAsync("domain-object-editor"))">
+                                        <RadzenIcon Icon="edit_square" />
+                                        <span>Project Domain Objects</span>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="app-menu-trigger">
+                            <button type="button"
+                                    aria-expanded="@(openMenu == "labs")"
+                                    @onclick="@(() => ToggleMenu("labs"))">
+                                <RadzenIcon Icon="science" />
+                                <span>Labs</span>
+                            </button>
+                            @if (openMenu == "labs")
+                            {
+                                <div class="app-menu-popover">
+                                    <button type="button" @onclick="@(() => NavigateToAsync("parser-lab"))">
+                                        <RadzenIcon Icon="schema" />
+                                        <span>Parser Test Area</span>
+                                    </button>
+                                    <button type="button" @onclick="@(() => NavigateToAsync("tool-lab"))">
+                                        <RadzenIcon Icon="construction" />
+                                        <span>Tool Lab</span>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="app-menu-trigger">
+                            <button type="button"
+                                    aria-expanded="@(openMenu == "help")"
+                                    @onclick="@(() => ToggleMenu("help"))">
+                                <RadzenIcon Icon="help_outline" />
+                                <span>Help</span>
+                            </button>
+                            @if (openMenu == "help")
+                            {
+                                <div class="app-menu-popover">
+                                    <button type="button" @onclick="@OpenHelpAsync">
+                                    <RadzenIcon Icon="help_outline" />
+                                    <span>Help</span>
+                                    </button>
+                                    <button type="button" @onclick="@ShowAboutAsync">
+                                    <RadzenIcon Icon="info" />
+                                    <span>About</span>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </nav>
+                }
+            </div>
+        </RadzenHeader>
+    }
+
+    <RadzenBody>
+        <div class="rz-p-4">
+            @Body
+        </div>
+    </RadzenBody>
+</RadzenLayout>
+
+@code {
+    private bool isNavigationAuthenticated;
+    private string? openMenu;
+    private const string AuthStorageKey = "simpleAuth";
+    private const string AuthenticatedValue = "true";
+
+    private static event Func<Task>? AuthenticationChanged;
+
+    private bool IsKioskRoute =>
+        AppConfig.Current.Kiosk.Enabled &&
+        (string.IsNullOrWhiteSpace(CurrentRelativePath) ||
+         string.Equals(CurrentRelativePath, AppConfig.Current.Kiosk.Route.Trim('/'), StringComparison.OrdinalIgnoreCase));
+
+    private bool HideNavigationChrome =>
+        IsKioskRoute &&
+        AppConfig.Current.Kiosk.HideNavigationChrome;
+
+    private bool ShouldGateNavigationMenu =>
+        AppConfig.Current.Auth.Enabled &&
+        AppConfig.Current.Auth.RequireLoginForHome;
+
+    private bool CanShowNavigationMenu =>
+        !HideNavigationChrome &&
+        (!ShouldGateNavigationMenu || isNavigationAuthenticated);
+
+    private string LayoutClass => HideNavigationChrome ? "kiosk-shell" : string.Empty;
+
+    private string LayoutStyle => HideNavigationChrome
+        ? "grid-template-areas: 'rz-body'; grid-template-columns: 1fr; height: 100vh;"
+        : "grid-template-areas: 'rz-header' 'rz-body'; grid-template-columns: 1fr; grid-template-rows: 72px minmax(0, 1fr); height: 100vh;";
+
+    private string CurrentRelativePath
+    {
+        get
+        {
+            var relative = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+            var queryIndex = relative.IndexOf('?', StringComparison.Ordinal);
+            return (queryIndex >= 0 ? relative[..queryIndex] : relative).Trim('/');
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+        AuthenticationChanged += RefreshNavigationAuthStateFromEventAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        await RefreshNavigationAuthStateAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            openMenu = null;
+            await RefreshNavigationAuthStateAsync();
+            StateHasChanged();
+        });
+    }
+
+    public static async Task NotifyAuthenticationChangedAsync()
+    {
+        var handler = AuthenticationChanged;
+        if (handler != null)
+        {
+            await handler.Invoke();
+        }
+    }
+
+    private async Task RefreshNavigationAuthStateFromEventAsync()
+    {
+        await InvokeAsync(async () =>
+        {
+            await RefreshNavigationAuthStateAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task RefreshNavigationAuthStateAsync()
+    {
+        if (!ShouldGateNavigationMenu)
+        {
+            isNavigationAuthenticated = true;
+            return;
+        }
+
+        var authValue = await JSRuntime.InvokeAsync<string>("authStateManager.load", AuthStorageKey);
+        isNavigationAuthenticated = string.Equals(authValue, AuthenticatedValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task OpenHelpAsync()
+    {
+        openMenu = null;
+        await DialogService.OpenAsync<HelpDialog>(
+            "Schema Studio Help Console",
+            new Dictionary<string, object?>
+            {
+                { "InitialSubjectId", "system-overview" }
+            },
+            new DialogOptions
+            {
+                Width = "1100px",
+                Height = "760px",
+                Resizable = true,
+                Draggable = true
+            });
+    }
+
+    private Task ShowAboutAsync()
+    {
+        openMenu = null;
+        NavigationManager.NavigateTo("/about");
+        return Task.CompletedTask;
+    }
+
+    private Task NavigateToSchemaExplorerAsync()
+    {
+        openMenu = null;
+        NavigationManager.NavigateTo("/explore");
+        return Task.CompletedTask;
+    }
+
+    private Task NavigateToAsync(string uri)
+    {
+        openMenu = null;
+        NavigationManager.NavigateTo(uri);
+        return Task.CompletedTask;
+    }
+
+    private void ToggleMenu(string menuName)
+    {
+        openMenu = openMenu == menuName ? null : menuName;
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+        AuthenticationChanged -= RefreshNavigationAuthStateFromEventAsync;
+    }
+}

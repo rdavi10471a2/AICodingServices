@@ -1,0 +1,1326 @@
+@using Radzen
+@using SchemaStudio.Data.Models
+@using SchemaStudio.AIHelpers
+@using SchemaStudioWebViewer.Components.HelpSystem
+@using SchemaStudioWebViewer.WEBSemanticModel.Model
+@using SchemaStudioWebViewer.WEBSemanticModel.Services
+@using System.Text
+@using System.Text.RegularExpressions
+@inject DialogService DialogService
+@inject IJSRuntime JSRuntime
+@inject ViewParsingService ParserService
+@inject TooltipService TooltipService
+
+@attribute [FileVersion("1.12")]
+@attribute [AIChange(
+    "1.6",
+    "2026-04-30 07:21 PM CDT kept Business Name, Business Description, and Developer Notes visible as multiline detail fields even when values are blank.",    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.5",
+    "2026-04-30 07:03 PM CDT rendered Business Name and Business Description details as multiline readonly text fields in the View Details panel.",    AICommandStatus.Pending)]
+@attribute [AIChange(
+    "1.4",
+    "2026-04-30 06:58 PM CDT stabilized the View Details dialog layout by making panels own their height and restoring single wrapper scrolling for tree content.",
+    AICommandStatus.Pending)]
+@attribute [AIChange("1.3", "2026-04-30 05:43 PM CDT removed the wrapper scrollbar from View Details tree panels so RadzenTree remains the single scroll owner without changing the tree shape.", AICommandStatus.Pending)]
+@attribute [AIChange("1.2", "2026-04-30 05:34 PM CDT restored RadzenTree fill styling and wrapped FROM/JOIN sources under the selected view so base-table source trees use the same hierarchy as composed views.", AICommandStatus.Pending)]
+@attribute [AIChange("1.1", "2026-04-30 05:20 PM CDT made the View Details dialog panels use wrapper-owned scrolling so RadzenTree content no longer creates duplicate scrollbars.", AICommandStatus.Pending)]
+@attribute [AIChange("1.0", "2026-04-30 03:57 PM CDT moved the View Details help launcher from the dialog footer to the top-right utility row while leaving the standard dialog close affordances intact.", AICommandStatus.Pending)]
+
+<div class="resolved-chain-dialog-root">
+    <div class="chain-dialog-top-actions">
+        <RadzenIcon Icon="help_outline"
+                    title="Parsed Shape help"
+                    aria-label="Parsed Shape help"
+                    class="chain-dialog-help-button"
+                    @onclick="@OpenHelpAsync" />
+    </div>
+
+    <RadzenTabs class="resolved-chain-tabs"
+                RenderMode="TabRenderMode.Client"
+                @bind-SelectedIndex="SelectedTabIndex">
+        <Tabs>
+            <RadzenTabsItem Text="Parsed Shape">
+                <div class="resolved-chain-layout">
+                    <section class="chain-panel column-panel">
+                        <header class="chain-panel-header">
+                            <span>SELECT COLUMNS (@ColumnNodes.Count)</span>
+                            <RadzenIcon Icon="help_outline"
+                                        class="chain-help-icon"
+                                        MouseEnter="@(args => TooltipService.Open(args, "Projected columns returned by this view. Expand a column to inspect where its meaning is inherited from and where its physical data comes from."))" />
+                        </header>
+                        <div class="chain-tree-wrap">
+                            <RadzenTree Data="@ColumnNodes"
+                                        Change="@OnTreeSelectionChanged"
+                                        Style="width: 100%;">
+                                <RadzenTreeLevel TextProperty="@nameof(ExplorerTreeNode.Text)"
+                                                 ChildrenProperty="@nameof(ExplorerTreeNode.Children)"
+                                                 HasChildren="@HasChildren"
+                                                 Expanded="@IsExpanded"
+                                                 Selected="@IsSelected">
+                                    <Template Context="treeItem">
+                                        @if (treeItem.Value is ExplorerTreeNode node)
+                                        {
+                                            @RenderNode(node)
+                                        }
+                                    </Template>
+                                </RadzenTreeLevel>
+                            </RadzenTree>
+                        </div>
+                    </section>
+
+                    <section class="chain-panel source-panel">
+                        <header class="chain-panel-header">
+                            <span>FROM / JOIN SOURCES</span>
+                            <RadzenIcon Icon="help_outline"
+                                        class="chain-help-icon"
+                                        MouseEnter="@(args => TooltipService.Open(args, "Objects used by the selected view. View nodes can expand to show the next layer of tables or views they depend on."))" />
+                        </header>
+                        <div class="chain-tree-wrap">
+                            <RadzenTree Data="@SourceNodes"
+                                        Change="@OnTreeSelectionChanged"
+                                        Style="width: 100%;">
+                                <RadzenTreeLevel TextProperty="@nameof(ExplorerTreeNode.Text)"
+                                                 ChildrenProperty="@nameof(ExplorerTreeNode.Children)"
+                                                 HasChildren="@HasChildren"
+                                                 Expanded="@IsExpanded"
+                                                 Selected="@IsSelected">
+                                    <Template Context="treeItem">
+                                        @if (treeItem.Value is ExplorerTreeNode node)
+                                        {
+                                            @RenderNode(node)
+                                        }
+                                    </Template>
+                                </RadzenTreeLevel>
+                            </RadzenTree>
+                        </div>
+                    </section>
+
+                    <aside class="chain-panel detail-panel">
+                        <header class="chain-panel-header">@SelectedTitle</header>
+                        <div class="detail-body">
+                            @if (SelectedNode == null)
+                            {
+                                <div class="empty-detail">Select a column, inheritance node, lineage node, view, or table.</div>
+                            }
+                            else
+                            {
+                                <div class="detail-heading">
+                                    @if (!string.IsNullOrWhiteSpace(SelectedNode.Badge))
+                                    {
+                                        <span class="node-badge @SelectedNode.BadgeClass">@SelectedNode.Badge</span>
+                                    }
+                                    <span>@SelectedNode.Text</span>
+                                </div>
+
+                                <div class="detail-scroll">
+                                    @foreach (var detail in SelectedNode.Details)
+                                    {
+                                        <div class="@GetDetailRowClass(detail)">
+                                            <span class="detail-label">
+                                                @detail.Label
+                                                @if (!string.IsNullOrWhiteSpace(detail.HelpText))
+                                                {
+                                                    <RadzenIcon Icon="help_outline"
+                                                                class="detail-help-icon"
+                                                                MouseEnter="@(args => TooltipService.Open(args, detail.HelpText))" />
+                                                }
+                                            </span>
+                                            @if (IsMultilineDetailField(detail.Label))
+                                            {
+                                                <textarea class="detail-value-textarea"
+                                                          rows="@GetDetailTextRows(detail.Label)"
+                                                          readonly>@detail.Value</textarea>
+                                            }
+                                            else
+                                            {
+                                                <strong>@detail.Value</strong>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+
+                                @if (SelectedNode.Kind == TreeNodeKind.View)
+                                {
+                                    <div class="detail-actions">
+                                        <RadzenButton Text="Show SQL"
+                                                      Icon="code"
+                                                      Size="ButtonSize.Small"
+                                                      ButtonStyle="ButtonStyle.Light"
+                                                      Click="@ShowSelectedViewSqlAsync" />
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </aside>
+                </div>
+            </RadzenTabsItem>
+            @foreach (var sqlTab in SqlTabs)
+            {
+                <RadzenTabsItem Text="@sqlTab.Title">
+                    <div class="resolved-chain-sql-pane">
+                        <div class="sql-code-container resolved-chain-sql">
+                            <pre class="language-sql"><code class="language-sql">@sqlTab.Content</code></pre>
+                        </div>
+                        @if (sqlTab.CanClose)
+                        {
+                            <div class="sql-tab-actions">
+                                <RadzenButton Text="Close Tab"
+                                              Icon="close"
+                                              Size="ButtonSize.Small"
+                                              ButtonStyle="ButtonStyle.Light"
+                                              Click="@(() => CloseSqlTab(sqlTab))" />
+                            </div>
+                        }
+                    </div>
+                </RadzenTabsItem>
+            }
+            <RadzenTabsItem Text="Generate Annotated SQL">
+                <div class="resolved-chain-sql-pane">
+                    @if (!IsBaseObject)
+                    {
+                        <div class="annotated-sql-empty">
+                            Annotated SQL generation is available for base views only. Composed views inherit metadata from base definitions and should not own parser comments.
+                        </div>
+                    }
+                    else if (string.IsNullOrWhiteSpace(AnnotatedSql))
+                    {
+                        <div class="annotated-sql-empty">
+                            No parsed projection was available to generate annotated SQL.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="annotated-sql-toolbar">
+                            <span>@AnnotatedSqlSummary</span>
+                            <RadzenButton Text="Copy SQL"
+                                          Icon="content_copy"
+                                          Size="ButtonSize.Small"
+                                          ButtonStyle="ButtonStyle.Primary"
+                                          Click="@CopyAnnotatedSqlAsync" />
+                        </div>
+                        <div class="annotated-sql-warning">
+                            This reconstructs the SELECT projection from parser output and saved metadata. Extra comments and formatting from the original view are not preserved.
+                        </div>
+                        <div class="sql-code-container resolved-chain-sql">
+                            <pre class="language-sql"><code class="language-sql">@AnnotatedSql</code></pre>
+                        </div>
+                    }
+                </div>
+            </RadzenTabsItem>
+        </Tabs>
+    </RadzenTabs>
+
+    <div class="chain-dialog-actions">
+        <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Light" Click="@(() => DialogService.Close())" />
+    </div>
+</div>
+
+<style>
+    .resolved-chain-dialog-root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: calc(100vh - 120px);
+        overflow: hidden;
+    }
+
+    .resolved-chain-tabs {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .chain-dialog-top-actions {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 0 0.75rem 0.25rem;
+    }
+
+    .chain-dialog-help-button {
+        cursor: pointer;
+        color: var(--rz-primary);
+        font-size: 1.25rem;
+    }
+
+    .resolved-chain-tabs.rz-tabview,
+    .resolved-chain-tabs .rz-tabview,
+    .resolved-chain-tabs .rz-tabview-panels,
+    .resolved-chain-tabs .rz-tabview-panel {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .resolved-chain-layout {
+        display: grid;
+        grid-template-columns: minmax(520px, 1fr) minmax(460px, 0.9fr);
+        grid-template-rows: minmax(220px, 1fr) minmax(180px, 0.82fr);
+        grid-template-areas:
+            "columns details"
+            "sources details";
+        gap: 0.75rem;
+        height: 100%;
+        padding: 0.75rem;
+        overflow: hidden;
+    }
+
+    .chain-panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        max-height: 100%;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        background: #fff;
+        overflow: hidden;
+    }
+
+    .column-panel {
+        grid-area: columns;
+    }
+
+    .source-panel {
+        grid-area: sources;
+    }
+
+    .detail-panel {
+        grid-area: details;
+    }
+
+    .chain-panel-header {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 0.65rem 0.85rem;
+        border-bottom: 1px solid #e7ebf0;
+        background: #f8f9fb;
+        color: #1f2937;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    .chain-help-icon,
+    .detail-help-icon {
+        color: var(--rz-primary);
+        cursor: help;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+
+    .chain-help-icon {
+        font-size: 1rem;
+    }
+
+    .chain-tree-wrap {
+        flex: 1;
+        box-sizing: border-box;
+        min-height: 0;
+        overflow: auto;
+        padding: 0.45rem 0.35rem;
+    }
+
+    .chain-tree-wrap .rz-tree {
+        width: 100% !important;
+    }
+
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content {
+        min-height: 28px;
+        border-radius: 4px;
+        color: #1f2937;
+    }
+
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-highlight,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-highlight:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-selected,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-selected:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-active,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-active:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-focused,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-focused:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-highlight,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-highlight:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-selected,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-selected:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-active,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-active:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-focused,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-focused:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-state-highlight,
+    .resolved-chain-dialog-root .rz-tree .rz-state-highlight:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-state-selected,
+    .resolved-chain-dialog-root .rz-tree .rz-state-selected:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-state-active,
+    .resolved-chain-dialog-root .rz-tree .rz-state-active:hover,
+    .resolved-chain-dialog-root .rz-tree .rz-state-focused,
+    .resolved-chain-dialog-root .rz-tree .rz-state-focused:hover {
+        background: #eef3ff !important;
+        color: #1f2937 !important;
+        box-shadow: inset 3px 0 0 var(--rz-primary);
+    }
+
+    .resolved-chain-dialog-root .rz-tree .rz-state-highlight *,
+    .resolved-chain-dialog-root .rz-tree .rz-state-selected *,
+    .resolved-chain-dialog-root .rz-tree .rz-state-active *,
+    .resolved-chain-dialog-root .rz-tree .rz-state-focused *,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-highlight *,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-selected *,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-active *,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-focused *,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-highlight *,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-selected *,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-active *,
+    .resolved-chain-dialog-root .rz-tree .rz-treeitem-content.rz-state-focused * {
+        color: #1f2937 !important;
+    }
+
+    .resolved-chain-dialog-root .rz-tree .rz-state-highlight .node-badge,
+    .resolved-chain-dialog-root .rz-tree .rz-state-selected .node-badge,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-highlight .node-badge,
+    .resolved-chain-dialog-root .rz-tree .rz-tree-item-content.rz-state-selected .node-badge {
+        background: #f5f7ff !important;
+        border-color: #d7ddff !important;
+        color: var(--rz-primary) !important;
+    }
+
+    .tree-node-content {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-width: 0;
+        max-width: 100%;
+        color: #1f2937;
+        line-height: 1.45;
+    }
+
+    .tree-node-content.selected-node {
+        border-radius: 4px;
+        background: #eef3ff !important;
+        color: #1f2937 !important;
+        box-shadow: inset 3px 0 0 var(--rz-primary);
+        padding: 0.12rem 0.35rem;
+    }
+
+    .tree-node-content.selected-node .tree-node-text {
+        color: #1f2937 !important;
+    }
+
+    .tree-node-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 500;
+    }
+
+    .tree-node-secondary {
+        color: #6b7280;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    .node-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 18px;
+        padding: 0 0.4rem;
+        border: 1px solid #d7ddff;
+        border-radius: 3px;
+        background: #f5f7ff;
+        color: var(--rz-primary);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .node-badge.lineage {
+        border-color: #d9e7dc;
+        background: #f4faf5;
+        color: #2f7d46;
+    }
+
+    .node-badge.inheritance {
+        border-color: #dde3ff;
+        background: #f5f7ff;
+        color: #335cff;
+    }
+
+    .node-badge.cte {
+        border-color: #d8ece7;
+        background: #f1fbf8;
+        color: #047857;
+    }
+
+    .node-badge.warning {
+        border-color: #fde2a8;
+        background: #fff8e6;
+        color: #9a6500;
+    }
+
+    .detail-body {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        padding: 1rem;
+    }
+
+    .detail-heading {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-bottom: 0.85rem;
+        border-bottom: 1px solid #e7ebf0;
+        color: #111827;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+    .detail-actions {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: flex-end;
+        padding: 0.75rem 0 0;
+        border-top: 1px solid #e7ebf0;
+    }
+
+    .detail-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+    }
+
+    .detail-row {
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        gap: 1rem;
+        padding: 0.78rem 0;
+        border-bottom: 1px solid #eef0f3;
+    }
+
+    .detail-row.multiline-detail-row {
+        align-items: start;
+    }
+
+    .detail-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: #4b5563;
+        font-size: 0.83rem;
+    }
+
+    .detail-help-icon {
+        font-size: 0.95rem;
+    }
+
+    .detail-row strong {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: #1f2937;
+        font-size: 0.86rem;
+        font-weight: 500;
+    }
+
+    .detail-value-textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        resize: vertical;
+        border: 1px solid #d8dee8;
+        border-radius: 4px;
+        background: #fff;
+        color: #1f2937;
+        font: inherit;
+        font-size: 0.86rem;
+        line-height: 1.45;
+        overflow: auto;
+        padding: 0.45rem 0.55rem;
+    }
+
+    .detail-value-textarea:focus {
+        border-color: var(--rz-primary);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(51, 92, 255, 0.12);
+    }
+
+    .empty-detail {
+        color: #6b7280;
+        font-size: 0.9rem;
+    }
+
+    .resolved-chain-sql-pane {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        padding: 0.75rem;
+        gap: 0.5rem;
+    }
+
+    .sql-tab-actions {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .resolved-chain-sql {
+        --sql-keyword-color: #0000ff;
+        --sql-comment-color: #008000;
+        --sql-string-color: #a31515;
+        flex: 1;
+        min-height: 0;
+        border: 1px solid #c9d1d9;
+        border-radius: 4px;
+        overflow: auto;
+        background: #ffffff;
+        color: #111827;
+    }
+
+    .resolved-chain-sql pre[class*="language-"],
+    .resolved-chain-sql code[class*="language-"] {
+        background: #ffffff !important;
+        color: #111827 !important;
+        text-shadow: none !important;
+    }
+
+    .resolved-chain-sql .token.keyword {
+        color: var(--sql-keyword-color) !important;
+        font-weight: 700;
+    }
+
+    .resolved-chain-sql .token.string {
+        color: var(--sql-string-color) !important;
+    }
+
+    .resolved-chain-sql .token.comment {
+        color: var(--sql-comment-color) !important;
+        font-style: normal;
+        font-weight: 500;
+    }
+
+    .resolved-chain-sql .token.operator,
+    .resolved-chain-sql .token.punctuation {
+        color: #374151 !important;
+    }
+
+    .resolved-chain-sql .token.function,
+    .resolved-chain-sql .token.builtin {
+        color: #0f766e !important;
+    }
+
+    .resolved-chain-sql .token.number {
+        color: #b45309 !important;
+    }
+
+    .chain-dialog-actions {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        padding: 0.5rem 0.75rem 0.75rem;
+    }
+
+    .annotated-sql-toolbar {
+        flex: 0 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem;
+        border-bottom: 1px solid #dee2e6;
+        color: #475467;
+        font-size: 0.875rem;
+    }
+
+    .annotated-sql-warning {
+        flex: 0 0 auto;
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid #f4c790;
+        background: #fff8eb;
+        color: #8a4b0f;
+        font-size: 0.9rem;
+        line-height: 1.35;
+    }
+
+    .annotated-sql-empty {
+        margin: 0.75rem;
+        padding: 1rem;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #475467;
+    }
+</style>
+
+@code {
+    [Parameter] public ParsedQuery? ParsedView { get; set; }
+    [Parameter] public string SqlContent { get; set; } = string.Empty;
+    [Parameter] public string SelectedViewName { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<SchemaObjectColumnDefinition> SavedColumns { get; set; } = Array.Empty<SchemaObjectColumnDefinition>();
+    [Parameter] public bool IsBaseObject { get; set; }
+
+    private List<ExplorerTreeNode> ColumnNodes { get; set; } = new();
+    private List<ExplorerTreeNode> SourceNodes { get; set; } = new();
+    private List<SqlViewTab> SqlTabs { get; set; } = new();
+    private ExplorerTreeNode? SelectedNode { get; set; }
+    private int SelectedTabIndex { get; set; }
+    private string AnnotatedSql { get; set; } = string.Empty;
+    private string AnnotatedSqlSummary { get; set; } = string.Empty;
+
+    private string SelectedTitle => SelectedNode?.Kind switch
+    {
+        TreeNodeKind.Column => "Selected Column",
+        TreeNodeKind.Inheritance => "Inheritance",
+        TreeNodeKind.Lineage => "Physical Lineage",
+        TreeNodeKind.View => "Selected View",
+        TreeNodeKind.Table => "Selected Table",
+        _ => "Details"
+    };
+
+    protected override void OnParametersSet()
+    {
+        ColumnNodes = BuildColumnNodes(ParsedView?.Columns ?? new List<ViewSourcedColumnDefinition>());
+        SourceNodes = BuildSourceNodes(ParsedView, SelectedViewName);
+        BuildAnnotatedSql();
+        EnsureInitialSqlTab();
+        SelectedNode ??= ColumnNodes.FirstOrDefault();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !string.IsNullOrWhiteSpace(SqlContent))
+        {
+            await JSRuntime.InvokeVoidAsync("highlightSql", 30);
+        }
+    }
+
+    private RenderFragment RenderNode(ExplorerTreeNode node) => @<div class="@GetTreeNodeContentClass(node)" title="@node.Tooltip">
+        @if (!string.IsNullOrWhiteSpace(node.Badge))
+        {
+            <span class="node-badge @node.BadgeClass">@node.Badge</span>
+        }
+        <span class="tree-node-text">@node.Text</span>
+        @if (!string.IsNullOrWhiteSpace(node.SecondaryText))
+        {
+            <span class="tree-node-secondary">@node.SecondaryText</span>
+        }
+    </div>;
+
+    private static bool HasChildren(object value) =>
+        value is ExplorerTreeNode node && node.Children.Count > 0;
+
+    private static bool IsExpanded(object value) =>
+        value is ExplorerTreeNode node && node.Expanded;
+
+    private bool IsSelected(object value) =>
+        value is ExplorerTreeNode node && ReferenceEquals(node, SelectedNode);
+
+    private string GetTreeNodeContentClass(ExplorerTreeNode node) =>
+        ReferenceEquals(node, SelectedNode)
+            ? "tree-node-content selected-node"
+            : "tree-node-content";
+
+    private static string GetDetailRowClass(DetailRow detail) =>
+        IsMultilineDetailField(detail.Label)
+            ? "detail-row multiline-detail-row"
+            : "detail-row";
+
+    private static bool IsMultilineDetailField(string label) =>
+        string.Equals(label, "Business Name", StringComparison.Ordinal)
+        || string.Equals(label, "Business Description", StringComparison.Ordinal);
+
+    private static int GetDetailTextRows(string label) =>
+        string.Equals(label, "Business Description", StringComparison.Ordinal)
+            ? 4
+            : 2;
+
+    private void OnTreeSelectionChanged(TreeEventArgs args)
+    {
+        if (args.Value is ExplorerTreeNode node)
+        {
+            SelectedNode = node;
+        }
+    }
+
+    private async Task ShowSelectedViewSqlAsync()
+    {
+        if (SelectedNode?.Kind != TreeNodeKind.View)
+        {
+            return;
+        }
+
+        var sql = ParserService.GetViewSql(
+            SelectedNode.Database,
+            SelectedNode.Schema,
+            SelectedNode.ObjectName);
+
+        var key = FormatQualifiedName(SelectedNode.Database, SelectedNode.Schema, SelectedNode.ObjectName);
+        var title = string.IsNullOrWhiteSpace(SelectedNode.ObjectName)
+            ? "SQL"
+            : $"SQL - {SelectedNode.ObjectName}";
+
+        var tabIndex = SqlTabs.FindIndex(tab => string.Equals(tab.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (tabIndex < 0)
+        {
+            SqlTabs.Add(new SqlViewTab(key, title, sql ?? string.Empty, true));
+            tabIndex = SqlTabs.Count - 1;
+        }
+
+        SelectedTabIndex = tabIndex + 1;
+        await InvokeAsync(StateHasChanged);
+        await JSRuntime.InvokeVoidAsync("highlightSql", 30);
+    }
+
+    private void EnsureInitialSqlTab()
+    {
+        if (SqlTabs.Count > 0 || string.IsNullOrWhiteSpace(SqlContent))
+        {
+            return;
+        }
+
+        SqlTabs.Add(new SqlViewTab("selected-view", "View SQL", SqlContent, false));
+    }
+
+    private void CloseSqlTab(SqlViewTab tab)
+    {
+        if (!tab.CanClose)
+        {
+            return;
+        }
+
+        var tabIndex = SqlTabs.IndexOf(tab);
+        if (tabIndex < 0)
+        {
+            return;
+        }
+
+        SqlTabs.RemoveAt(tabIndex);
+
+        if (SelectedTabIndex == tabIndex + 1)
+        {
+            SelectedTabIndex = 1;
+        }
+        else if (SelectedTabIndex > tabIndex + 1)
+        {
+            SelectedTabIndex--;
+        }
+    }
+
+    private async Task CopyAnnotatedSqlAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(AnnotatedSql))
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", AnnotatedSql);
+        }
+    }
+
+    private void BuildAnnotatedSql()
+    {
+        AnnotatedSql = string.Empty;
+        AnnotatedSqlSummary = string.Empty;
+
+        var parsedView = ParsedView;
+        if (!IsBaseObject || parsedView == null || parsedView.SelectItems.Count == 0)
+        {
+            return;
+        }
+
+        var savedByName = SavedColumns
+            .Where(column => !string.IsNullOrWhiteSpace(column.SourceColumnName))
+            .GroupBy(column => column.SourceColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var builder = new StringBuilder();
+        var matchedSavedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var annotatedCount = 0;
+        var parsedWithoutMetadataCount = 0;
+        var activeLines = new List<string>();
+
+        builder.AppendLine("-- Generated annotated SELECT projection.");
+        builder.AppendLine("-- Parser shape owns the projection; saved base-view metadata owns emitted comments.");
+        builder.AppendLine("-- This is a reconstruction, not a merge. Original extra comments and formatting are not preserved.");
+        builder.AppendLine("-- Review before copying into a view definition.");
+        builder.AppendLine();
+        builder.AppendLine("SELECT");
+
+        foreach (var selectItem in parsedView.SelectItems)
+        {
+            var projection = BuildProjectionText(selectItem);
+            if (string.IsNullOrWhiteSpace(projection))
+            {
+                continue;
+            }
+
+            var annotation = string.Empty;
+            var outputName = GetSelectItemOutputName(selectItem);
+            if (!string.IsNullOrWhiteSpace(outputName) &&
+                savedByName.TryGetValue(outputName, out var savedColumn))
+            {
+                annotation = BuildMetadataComment(savedColumn, projection, selectItem.DisableInheritance);
+                matchedSavedColumns.Add(savedColumn.SourceColumnName);
+                if (!string.IsNullOrWhiteSpace(annotation))
+                {
+                    annotatedCount++;
+                }
+            }
+            else
+            {
+                parsedWithoutMetadataCount++;
+            }
+
+            var linePrefix = activeLines.Count == 0
+                ? "    "
+                : "  , ";
+            activeLines.Add($"{linePrefix}{projection}{annotation}");
+        }
+
+        for (var index = 0; index < activeLines.Count; index++)
+        {
+            builder.AppendLine(activeLines[index]);
+        }
+
+        var savedOnlyColumns = SavedColumns
+            .Where(column => !string.IsNullOrWhiteSpace(column.SourceColumnName))
+            .Where(column => !matchedSavedColumns.Contains(column.SourceColumnName))
+            .OrderBy(column => column.OrdinalPosition)
+            .ThenBy(column => column.SourceColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (savedOnlyColumns.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("-- ============================================================");
+            builder.AppendLine("-- SAVED COLUMNS NOT FOUND IN CURRENT PARSED SHAPE");
+            builder.AppendLine("-- This is a merge/view-shape issue. These saved columns were");
+            builder.AppendLine("-- not emitted into the active SELECT projection.");
+            builder.AppendLine("-- Resolve with Review Merge or update the SQL view text.");
+            builder.AppendLine("-- ============================================================");
+
+            foreach (var savedOnly in savedOnlyColumns)
+            {
+                var projection = FormatDelimitedIdentifier(savedOnly.SourceColumnName);
+                var annotation = BuildMetadataComment(savedOnly, projection);
+                builder.AppendLine($"-- {projection}{annotation.Replace(Environment.NewLine, $"{Environment.NewLine}-- ", StringComparison.Ordinal)}");
+            }
+        }
+
+        AnnotatedSql = builder.ToString().TrimEnd();
+        var generatedText = annotatedCount == 1
+            ? "Generated 1 metadata comment"
+            : $"Generated {annotatedCount} metadata comments";
+
+        AnnotatedSqlSummary = $"{generatedText} from saved base-view metadata. {parsedWithoutMetadataCount} parsed columns had no saved metadata. {savedOnlyColumns.Count} saved columns were not found in the current parsed shape.";
+    }
+
+    private static string BuildProjectionText(SelectItem selectItem)
+    {
+        var expression = !string.IsNullOrWhiteSpace(selectItem.ExpressionText)
+            ? selectItem.ExpressionText
+            : selectItem.Expression;
+
+        expression = NormalizeProjectionExpression(expression);
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(selectItem.Alias) || ProjectionAlreadyNamesAlias(expression, selectItem.Alias, selectItem.Kind))
+        {
+            return expression;
+        }
+
+        return $"{expression} AS {FormatDelimitedIdentifier(selectItem.Alias)}";
+    }
+
+    private static string GetSelectItemOutputName(SelectItem selectItem)
+    {
+        if (!string.IsNullOrWhiteSpace(selectItem.Alias))
+        {
+            return selectItem.Alias;
+        }
+
+        if (selectItem.Kind != ColumnKind.Simple)
+        {
+            return string.Empty;
+        }
+
+        var expression = !string.IsNullOrWhiteSpace(selectItem.ExpressionText)
+            ? selectItem.ExpressionText
+            : selectItem.Expression;
+
+        var tail = NormalizeProjectionExpression(expression)
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault();
+
+        return UnquoteIdentifier(tail) ?? string.Empty;
+    }
+
+    private static string NormalizeProjectionExpression(string? expression) =>
+        string.IsNullOrWhiteSpace(expression)
+            ? string.Empty
+            : Regex.Replace(expression, @"\s+", " ").Trim();
+
+    private static bool ProjectionAlreadyNamesAlias(string expression, string alias, ColumnKind kind)
+    {
+        if (kind != ColumnKind.Simple)
+        {
+            return false;
+        }
+
+        var tail = expression.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        tail = UnquoteIdentifier(tail);
+        return string.Equals(tail, alias, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatDelimitedIdentifier(string identifier) =>
+        NeedsDelimitedIdentifier(identifier)
+            ? $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]"
+            : identifier;
+
+    private static bool NeedsDelimitedIdentifier(string identifier) =>
+        string.IsNullOrWhiteSpace(identifier)
+        || !Regex.IsMatch(identifier, @"^[A-Za-z_][A-Za-z0-9_]*$");
+
+    private static string? UnquoteIdentifier(string? identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return identifier;
+        }
+
+        identifier = identifier.Trim();
+        if (identifier.Length >= 2 &&
+            ((identifier[0] == '[' && identifier[^1] == ']') ||
+             (identifier[0] == '"' && identifier[^1] == '"') ||
+             (identifier[0] == '\'' && identifier[^1] == '\'')))
+        {
+            return identifier[1..^1].Replace("]]", "]", StringComparison.Ordinal);
+        }
+
+        return identifier;
+    }
+
+    private static string BuildMetadataComment(SchemaObjectColumnDefinition column, string projection, bool parsedDisableInheritance = false)
+    {
+        var parts = new List<string>();
+
+        AddMetadataPart(parts, "BusinessName", column.BusinessName);
+        AddMetadataPart(parts, "BusinessDescription", column.BusinessDescription);
+
+        if (column.DisableInheritance)
+        {
+            parts.Add("@DisableInheritance: True");
+        }
+        else if (parsedDisableInheritance)
+        {
+            parts.Add("@DisableInheritance: False");
+        }
+
+        return parts.Count switch
+        {
+            0 => string.Empty,
+            1 => $" /* {parts[0]} */",
+            _ => BuildMultilineMetadataComment(parts, projection)
+        };
+    }
+
+    private static string BuildMultilineMetadataComment(IReadOnlyList<string> parts, string projection)
+    {
+        var tagIndent = new string(' ', projection.Length + 8);
+        var closeIndent = new string(' ', projection.Length + 4);
+        var builder = new StringBuilder();
+        builder.Append($" /* {parts[0]}");
+
+        for (var index = 1; index < parts.Count; index++)
+        {
+            builder.AppendLine();
+            builder.Append(tagIndent);
+            builder.Append(parts[index]);
+        }
+
+        builder.AppendLine();
+        builder.Append(closeIndent);
+        builder.Append("*/");
+        return builder.ToString();
+    }
+
+    private static void AddMetadataPart(List<string> parts, string tag, string? value)
+    {
+        var cleaned = NormalizeMetadataValue(value);
+        if (!string.IsNullOrWhiteSpace(cleaned))
+        {
+            parts.Add($"@{tag}: {cleaned}");
+        }
+    }
+
+    private static string NormalizeMetadataValue(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : Regex.Replace(value.Replace("*/", "* /", StringComparison.Ordinal), @"\s+", " ").Trim();
+
+    private async Task OpenHelpAsync()
+    {
+        await DialogService.OpenAsync<HelpDialog>(
+            "Schema Studio Help Console",
+            new Dictionary<string, object?>
+            {
+                { "InitialSubjectId", "view-details" }
+            },
+            new DialogOptions
+            {
+                Width = "1200px",
+                Height = "800px",
+                Resizable = true,
+                Draggable = false,
+                CloseDialogOnOverlayClick = false
+            });
+    }
+
+    private static List<ExplorerTreeNode> BuildColumnNodes(IEnumerable<ViewSourcedColumnDefinition> columns)
+    {
+        return columns
+            .OrderBy(column => column.OrdinalPosition)
+            .Select(column =>
+            {
+                var node = new ExplorerTreeNode(TreeNodeKind.Column, column.ColumnName)
+                {
+                    Tooltip = BuildColumnTooltip(column),
+                    Expanded = false
+                };
+
+                AddDetail(node, "Ordinal", column.OrdinalPosition.ToString());
+                AddDetail(node, "Column", column.ColumnName);
+                AddDetail(node, "Business Name", column.BusinessName, keepWhenBlank: true);
+                AddDetail(node, "Business Description", column.BusinessDescription, keepWhenBlank: true);
+                AddDetail(node, "Semantic Source", FormatQualifiedName(column.SemanticDatabase, column.SemanticSchema, column.SemanticObject, column.SemanticColumn));
+                AddDetail(node, "Physical Lineage", FormatQualifiedName(column.BaseDatabase, column.BaseSchema, column.BaseTable, column.BaseColumn));
+                AddDetail(node, "Inheritance", column.DisableInheritance ? "Disabled for this column" : "Allowed");
+
+                var semanticSource = FormatQualifiedName(column.SemanticDatabase, column.SemanticSchema, column.SemanticObject, column.SemanticColumn);
+                if (!string.IsNullOrWhiteSpace(semanticSource))
+                {
+                    node.Children.Add(new ExplorerTreeNode(TreeNodeKind.Inheritance, semanticSource)
+                    {
+                        Badge = "Inherits",
+                        BadgeClass = "inheritance",
+                        Tooltip = semanticSource,
+                        Details =
+                        {
+                            new DetailRow("Ordinal", column.OrdinalPosition.ToString(), GetDetailHelpText("Ordinal")),
+                            new DetailRow("Column", column.ColumnName),
+                            new DetailRow("Semantic Source", semanticSource, GetDetailHelpText("Semantic Source")),
+                            new DetailRow("Inheritance", column.DisableInheritance ? "Disabled" : "Allowed", GetDetailHelpText("Inheritance"))
+                        }
+                    });
+                }
+
+                var physicalLineage = FormatQualifiedName(column.BaseDatabase, column.BaseSchema, column.BaseTable, column.BaseColumn);
+                if (!string.IsNullOrWhiteSpace(physicalLineage))
+                {
+                    node.Children.Add(new ExplorerTreeNode(TreeNodeKind.Lineage, physicalLineage)
+                    {
+                        Badge = "Lineage",
+                        BadgeClass = "lineage",
+                        Tooltip = physicalLineage,
+                        Details =
+                        {
+                            new DetailRow("Ordinal", column.OrdinalPosition.ToString(), GetDetailHelpText("Ordinal")),
+                            new DetailRow("Column", column.ColumnName),
+                            new DetailRow("Physical Lineage", physicalLineage, GetDetailHelpText("Physical Lineage"))
+                        }
+                    });
+                }
+
+                if (node.Children.Count == 0)
+                {
+                    node.SecondaryText = "no semantic source or physical lineage";
+                }
+
+                return node;
+            })
+            .ToList();
+    }
+
+    private static string BuildColumnTooltip(ViewSourcedColumnDefinition column)
+    {
+        if (!string.IsNullOrWhiteSpace(column.BusinessDescription))
+        {
+            return string.IsNullOrWhiteSpace(column.BusinessName)
+                ? column.BusinessDescription
+                : $"{column.BusinessName}: {column.BusinessDescription}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(column.BusinessName))
+        {
+            return column.BusinessName;
+        }
+
+        return column.ColumnName;
+    }
+
+    private static List<ExplorerTreeNode> BuildSourceNodes(ParsedQuery? query, string selectedViewName)
+    {
+        if (query == null)
+        {
+            return new List<ExplorerTreeNode>();
+        }
+
+        var children = BuildSourceNodes(query.SourceTables);
+        if (children.Count == 0)
+        {
+            return children;
+        }
+
+        var viewIdentity = GetSelectedViewIdentity(query, selectedViewName);
+        var root = new ExplorerTreeNode(TreeNodeKind.View, viewIdentity.DisplayName)
+        {
+            Badge = "View",
+            BadgeClass = "inheritance",
+            Tooltip = viewIdentity.DisplayName,
+            Expanded = true,
+            Database = viewIdentity.Database,
+            Schema = viewIdentity.Schema,
+            ObjectName = viewIdentity.ObjectName
+        };
+
+        AddDetail(root, "Object", viewIdentity.DisplayName);
+        root.Children.AddRange(children);
+        return new List<ExplorerTreeNode> { root };
+    }
+
+    private static List<ExplorerTreeNode> BuildSourceNodes(IEnumerable<SourceTable> sources)
+    {
+        return sources
+            .Where(source => source.Kind != SourceKind.DerivedQuery && !string.IsNullOrWhiteSpace(source.Table))
+            .OrderBy(source => source.ResolvedOrder)
+            .Select(BuildSourceNode)
+            .ToList();
+    }
+
+    private static ExplorerTreeNode BuildSourceNode(SourceTable source)
+    {
+        var objectName = FormatQualifiedName(source.Database, source.Schema, source.Table);
+        var isCte = source.Kind == SourceKind.Cte;
+        var isView = !isCte && source.NestedQuery != null;
+        var nodeKind = isCte
+            ? TreeNodeKind.Cte
+            : isView
+                ? TreeNodeKind.View
+                : TreeNodeKind.Table;
+        var node = new ExplorerTreeNode(nodeKind, objectName)
+        {
+            Badge = isCte ? "CTE" : isView ? "View" : "Table",
+            BadgeClass = isCte ? "cte" : isView ? "inheritance" : string.Empty,
+            Tooltip = objectName,
+            Expanded = false
+        };
+
+        node.Database = source.Database ?? string.Empty;
+        node.Schema = source.Schema ?? string.Empty;
+        node.ObjectName = source.Table ?? string.Empty;
+
+        AddDetail(node, "Object", objectName);
+        AddDetail(node, "Source Type", node.Badge);
+        AddDetail(node, "Join Type", source.JoinType);
+        AddDetail(node, "Join", source.JoinExpression);
+
+        if (source.NestedQuery != null)
+        {
+            node.Children.AddRange(BuildSourceNodes(source.NestedQuery.SourceTables));
+        }
+
+        return node;
+    }
+
+    private static ViewIdentity GetSelectedViewIdentity(ParsedQuery query, string selectedViewName)
+    {
+        var projectedColumn = query.Columns.FirstOrDefault(column => !string.IsNullOrWhiteSpace(column.Table));
+        var database = projectedColumn?.Database ?? string.Empty;
+        var schema = projectedColumn?.Schema ?? string.Empty;
+        var objectName = projectedColumn?.Table ?? selectedViewName;
+        var displayName = FormatQualifiedName(database, schema, objectName);
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            displayName = selectedViewName;
+        }
+
+        return new ViewIdentity(database, schema, objectName, displayName);
+    }
+
+    private static void AddDetail(ExplorerTreeNode node, string label, string? value, bool keepWhenBlank = false)
+    {
+        if (keepWhenBlank || !string.IsNullOrWhiteSpace(value))
+        {
+            node.Details.Add(new DetailRow(label, value ?? string.Empty, GetDetailHelpText(label)));
+        }
+    }
+
+    private static string GetDetailHelpText(string label) =>
+        label switch
+        {
+            "Ordinal" => "The projected sequence of this column in the SELECT list.",
+            "Column" => "The column name exposed by the selected view.",
+            "Business Name" => "The friendly business label saved or inherited for this column.",
+            "Business Description" => "The business definition saved or inherited for this column.",
+            "Developer Notes" => "Internal implementation notes saved for this column.",
+            "Semantic Source" => "The nearest semantic object and column that define this column's meaning.",
+            "Physical Lineage" => "The physical database, schema, table, and column where the data ultimately comes from.",
+            "Inheritance" => "Whether semantic metadata inheritance is allowed for this projected column.",
+            "Object" => "The fully qualified object selected in the dependency tree.",
+            "Source Type" => "Whether this source is a persisted table, a persisted view, or a CTE alias inside the current SQL.",
+            "Join Type" => "The SQL join type used for this source object when available.",
+            "Join" => "The join expression parsed for this source object when available.",
+            _ => string.Empty
+        };
+
+    private static string FormatQualifiedName(params string?[] parts) =>
+        string.Join(".", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+    private enum TreeNodeKind
+    {
+        Column,
+        Inheritance,
+        Lineage,
+        View,
+        Cte,
+        Table
+    }
+
+    private sealed class ExplorerTreeNode
+    {
+        public ExplorerTreeNode(TreeNodeKind kind, string text)
+        {
+            Kind = kind;
+            Text = text;
+        }
+
+        public TreeNodeKind Kind { get; }
+        public string Text { get; }
+        public string SecondaryText { get; set; } = string.Empty;
+        public string Badge { get; set; } = string.Empty;
+        public string BadgeClass { get; set; } = string.Empty;
+        public string Tooltip { get; set; } = string.Empty;
+        public bool Expanded { get; set; }
+        public string Database { get; set; } = string.Empty;
+        public string Schema { get; set; } = string.Empty;
+        public string ObjectName { get; set; } = string.Empty;
+        public List<ExplorerTreeNode> Children { get; } = new();
+        public List<DetailRow> Details { get; init; } = new();
+    }
+
+    private sealed record DetailRow(string Label, string Value, string HelpText = "");
+
+    private sealed record SqlViewTab(string Key, string Title, string Content, bool CanClose);
+
+    private sealed record ViewIdentity(string Database, string Schema, string ObjectName, string DisplayName);
+}

@@ -1,0 +1,942 @@
+/* 2026-05-01 09:48 AM CDT AI manage-views-next marker: disabled and enabled metadata checkboxes keep the same visible target treatment. */
+/* 2026-04-30 11:21 PM CDT AI v1.38 manage-views-next marker: selector and View Definition panels stretch farther down the viewport so the left side no longer stops short of Column Metadata. */
+/* 2026-05-01 10:53 PM CDT AI v1.37 manage-views-next marker: flattened the Manage Views page title strip and tightened the page stack gap so the header stops consuming extra vertical space. */
+/* 2026-05-01 10:39 PM CDT AI v1.35 manage-views-next marker: action toolbar starts farther left and Column Synchronization spans two toolbar columns without forcing its own full row. */
+/* 2026-05-01 10:44 PM CDT AI v1.36 manage-views-next marker: sync summary moved to the title block and Review Merge returns to a normal toolbar button. */
+/* 2026-05-01 10:34 PM CDT AI v1.34 manage-views-next marker: toolbar buttons keep normal height while Column Synchronization spans its own compact row inside the toolbar grid. */
+/* 2026-05-01 10:29 PM CDT AI v1.33 manage-views-next marker: Column Synchronization now participates in the selected-view toolbar grid so it wraps with view actions when the selector is visible. */
+/* 2026-05-01 10:20 PM CDT AI v1.32 manage-views-next marker: selected-view header now carries a compact Column Synchronization strip so View Definition starts shorter. */
+/* 2026-05-01 10:05 PM CDT AI v1.31 manage-views-next marker: selected-view toolbar shell now bounds responsive button wrapping inside the header card. */
+/* 2026-05-01 09:50 PM CDT AI v1.30 manage-views-next marker: selected-view toolbar is now a CSS-owned responsive grid with full-width buttons that wrap inside the header instead of overflowing the card. */
+/* 2026-05-01 09:34 PM CDT AI v1.29 manage-views-next marker: selected-view toolbar gives full labels room first, then shrinks and wraps only as the header container tightens. */
+/* 2026-05-01 09:28 PM CDT AI v1.28 manage-views-next marker: selected-view toolbar buttons now use stable responsive grid sizing so narrower viewports wrap into compact rows without pushing the editor sideways. */
+/* 2026-04-30 07:16 PM CDT AI v1.26 manage-views-next marker: Base Object and Disable Inheritance now share the same dark checkbox target styling. */
+/* 2026-04-30 04:30 PM CDT AI v1.17 manage-views-next marker: column selector names own the row and detail fields align from the top instead of drifting out of view. */
+/* 2026-04-30 04:34 PM CDT AI v1.18 manage-views-next marker: metadata editor parents clip horizontal overflow and force Radzen textareas to resize vertically only. */
+/* 2026-04-30 05:59 PM CDT AI v1.25 manage-views-next marker: shared metadata textareas now load at a 100px readable minimum while preserving vertical resize. */
+/* 2026-04-30 05:13 PM CDT AI v1.24 manage-views-next marker: column list and selected-column editor now share the same grid row height so the listbox grows with the detail panel. */
+/* 2026-04-30 05:07 PM CDT AI v1.23 manage-views-next marker: only the column selector listbox is height-bounded so metadata textareas can grow their parent cards after load. */
+/* 2026-04-30 04:59 PM CDT AI v1.22 manage-views-next marker: the editor grid now owns a real bounded height so Column Metadata cannot expand the page and its listbox can scroll. */
+/* 2026-04-30 04:51 PM CDT AI v1.21 manage-views-next marker: Column Metadata follows the editor row height and scrolls within that parent instead of owning an independent viewport clamp. */
+/* 2026-04-30 04:43 PM CDT AI v1.20 manage-views-next marker: Column Metadata is capped to the viewport budget and scrolls internally instead of stretching the page. */
+/* 2026-04-30 04:24 PM CDT AI v1.15 manage-views-next marker: Column Metadata owns a viewport-aware height and stretches list/detail children inside it without overflow. */
+/* 2026-04-30 04:13 PM CDT AI v1.14 manage-views-next marker: column selector rows no longer reserve space for visible ordinals. */
+/* 2026-04-30 04:11 PM CDT AI v1.13 manage-views-next marker: shared multiline metadata textareas keep visible vertical scrollbars while allowing vertical resize. */
+/* 2026-04-30 04:09 PM CDT AI v1.12 manage-views-next marker: Disable Inheritance is a plain prominent checkbox row above the editable business fields. */
+/* 2026-04-30 04:03 PM CDT AI v1.11 manage-views-next marker: deep Radzen textarea and checkbox selectors keep resize and click affordances visually bounded. */
+/* 2026-04-30 03:53 PM CDT AI v1.10 manage-views-next marker: textareas are width-bounded and the Disable Inheritance checkbox has a visible field treatment. */
+/* 2026-04-30 03:39 PM CDT AI v1.9 manage-views-next marker: column selector rows are compact and the listbox has a taller default height after initial load. */
+/* 2026-04-30 03:13 PM CDT AI v1.8 manage-views-next marker: selector rail is viewport-bounded so long domain trees cannot push Reload Databases off screen. */
+/* 2026-04-30 03:09 PM CDT AI v1.6 manage-views-next marker: editor cards can grow inside the bounded page scroll while the column selector keeps a fixed listbox scroll. */
+/* 2026-04-30 03:02 PM CDT AI v1.5 manage-views-next marker: object-level tools moved to the selected-view header so edit panes stay focused on editable fields. */
+/* 2026-04-30 02:59 PM CDT AI v1.4 manage-views-next marker: selector rail is narrower and column metadata is a fixed scroll surface even when textareas are resized. */
+/* 2026-04-30 02:55 PM CDT AI v1.3 manage-views-next marker: column metadata panels use fixed local heights so the column selector scrolls like a listbox. */
+/* 2026-04-30 02:49 PM CDT AI v1.2 manage-views-next marker: synchronization is compact inside the view-definition pane and the editor grid owns local scroll space. */
+/* 2026-04-30 04:17 PM CDT AI v1.1 manage-views-next marker: bounded app-height layout uses internal scrolling for selector, workspace, and column lists. */
+/* 2026-04-30 03:37 PM CDT AI v1.0 manage-views-next marker: isolated styles keep the prototype layout separate from the current ManageViews page. */
+.manage-views-next {
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: stretch;
+    gap: 0.3rem !important;
+    overflow: hidden;
+}
+
+.mvn-page-header,
+.mvn-selected-header,
+.mvn-panel-header,
+.mvn-column-detail-header,
+.mvn-column-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.mvn-page-header {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+}
+
+.mvn-page-title,
+::deep .mvn-page-header :is(h1, h2, h3, h4, h5, .rz-text, .rz-text-h4) {
+    font-size: 1.45rem !important;
+    font-weight: 650;
+    line-height: 1 !important;
+    margin: 0 !important;
+}
+
+::deep .mvn-page-header .rz-button {
+    min-height: 30px;
+    height: 30px;
+    padding-block: 0.15rem;
+}
+
+.mvn-busy-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    background: rgba(248, 250, 252, 0.58);
+    pointer-events: none;
+}
+
+.mvn-busy-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 54px;
+    padding: 0.75rem 1.05rem;
+    border: 1px solid #d6dce7;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+    color: #263445;
+    font-size: 0.95rem;
+    font-weight: 650;
+}
+
+.mvn-busy-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid #c7cfda;
+    border-top-color: var(--rz-primary);
+    border-radius: 999px;
+    animation: mvn-spin 0.8s linear infinite;
+}
+
+.mvn-shell {
+    display: grid;
+    grid-template-columns: var(--mvn-selector-width, 380px) 10px minmax(0, 1fr);
+    gap: 0.5rem;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    align-items: stretch;
+}
+
+.mvn-shell-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.mvn-resize-handle {
+    align-self: stretch;
+    min-width: 10px;
+    width: 10px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    cursor: col-resize;
+    position: relative;
+}
+
+.mvn-resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 0.75rem;
+    bottom: 0.75rem;
+    left: 4px;
+    width: 2px;
+    border-radius: 999px;
+    background: #c7cfda;
+}
+
+.mvn-resize-handle:hover::before,
+.mvn-resizing .mvn-resize-handle::before {
+    background: var(--rz-primary);
+}
+
+.mvn-resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+.mvn-resizing-height {
+    cursor: row-resize;
+}
+
+.mvn-selector-panel,
+.mvn-card {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    box-shadow: none;
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+.mvn-selector-panel {
+    min-height: 0;
+    height: var(--mvn-selector-height, 100%);
+    max-height: 100%;
+    align-self: stretch;
+    position: relative;
+    top: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 0.75rem 0.55rem;
+    overflow: hidden;
+}
+
+.mvn-height-resize-handle {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.08rem;
+    left: 0.75rem;
+    height: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    cursor: row-resize;
+}
+
+.mvn-height-resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 4px;
+    right: 0;
+    left: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: #c7cfda;
+}
+
+.mvn-height-resize-handle:hover::before,
+.mvn-resizing-height .mvn-height-resize-handle::before {
+    background: var(--rz-primary);
+}
+
+.mvn-selector-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+    margin-bottom: 0.55rem;
+}
+
+.mvn-selector-filters {
+    display: grid;
+    gap: 0.6rem;
+    flex: 0 0 auto;
+    margin-bottom: 0.6rem;
+}
+
+.mvn-tree-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overflow-x: hidden;
+    padding: 0.25rem 0.25rem 0.25rem 0;
+    border-top: 1px solid #edf0f4;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.mvn-tree-domain,
+.mvn-tree-folder {
+    margin: 0.2rem 0;
+}
+
+.mvn-tree-domain summary,
+.mvn-tree-folder summary {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 30px;
+    cursor: pointer;
+    color: #1f2d3d;
+    font-weight: 700;
+    list-style: none;
+}
+
+.mvn-tree-domain summary::-webkit-details-marker,
+.mvn-tree-folder summary::-webkit-details-marker {
+    display: none;
+}
+
+.mvn-tree-domain summary::before,
+.mvn-tree-folder summary::before {
+    content: ">";
+    color: #7b8794;
+    font-size: 0.75rem;
+    width: 12px;
+}
+
+.mvn-tree-domain[open] > summary::before,
+.mvn-tree-folder[open] > summary::before {
+    content: "v";
+}
+
+.mvn-tree-folder {
+    margin-left: 0.8rem;
+}
+
+.mvn-tree-folder summary {
+    font-size: 0.9rem;
+    font-weight: 650;
+}
+
+.mvn-tree-item {
+    width: calc(100% - 0.95rem);
+    min-height: 32px;
+    margin: 0.1rem 0 0.1rem 0.95rem;
+    border: 0 !important;
+    border-left: 3px solid transparent;
+    background: transparent !important;
+    color: #263445;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.35rem 0.5rem;
+    text-align: left;
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.mvn-tree-item:hover {
+    background: #f5f7ff;
+}
+
+.mvn-tree-item.selected {
+    border-left-color: var(--rz-primary) !important;
+    background: #e9edff !important;
+    color: var(--rz-primary);
+    font-weight: 700;
+}
+
+.mvn-tree-empty {
+    color: #8a94a3;
+    font-size: 0.83rem;
+    font-style: italic;
+    margin: 0.25rem 0 0.4rem 2.2rem;
+}
+
+::deep .mvn-selector-reload-button {
+    flex: 0 0 auto;
+    min-height: 30px;
+    height: 30px;
+    padding-block: 0.15rem;
+    padding-inline: 0.45rem;
+    font-size: 0.78rem;
+}
+
+.mvn-workspace {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    padding-right: 0.2rem;
+}
+
+.mvn-card {
+    padding: 0.9rem;
+}
+
+.mvn-selected-header {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 0.45rem;
+}
+
+.mvn-placeholder {
+    min-height: 420px;
+    display: grid;
+    place-items: center;
+    color: #6c757d;
+    border-style: dashed;
+}
+
+.mvn-title-block {
+    min-width: 0;
+    display: grid;
+    gap: 0.25rem;
+}
+
+.mvn-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.mvn-source-name {
+    color: #6c757d;
+}
+
+.mvn-title-sync-counts {
+    color: #263445;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+.mvn-title-sync-counts span:first-child {
+    color: var(--rz-primary);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mvn-view-tools {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.mvn-view-tools-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 30px;
+    padding: 0.25rem 0.6rem;
+    border: 0;
+    border-radius: 4px;
+    background: #e7e9ee;
+    color: #263445;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.mvn-view-tools-trigger[aria-expanded="true"],
+.mvn-view-tools-trigger:hover {
+    background: #eef1f6;
+}
+
+.mvn-view-tools-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    min-width: 220px;
+    padding: 0.35rem;
+    border: 1px solid #d6dce7;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+}
+
+.mvn-view-tools-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    min-height: 32px;
+    padding: 0.35rem 0.5rem;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #263445;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.mvn-view-tools-menu button:hover {
+    background: #f3f5f9;
+}
+
+.mvn-view-tools-menu button:disabled {
+    color: #a8b0bc;
+    cursor: not-allowed;
+}
+
+.mvn-status-chip,
+.mvn-edited-chip,
+.mvn-state-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+}
+
+.mvn-status-chip {
+    background: #edf1ff;
+    border: 1px solid #cbd6ff;
+    color: #3355ff;
+}
+
+.mvn-edited-chip {
+    background: #e8f6ee;
+    border: 1px solid #b7dfc5;
+    color: #23824a;
+}
+
+.mvn-state-chip.added {
+    background: #e8f6ee;
+    border: 1px solid #b7dfc5;
+    color: #23824a;
+}
+
+.mvn-state-chip.removed {
+    background: #fff0f1;
+    border: 1px solid #f3a8b0;
+    color: #b42335;
+}
+
+.mvn-state-chip.edited {
+    background: #fff6e7;
+    border: 1px solid #f2c879;
+    color: #8a5a00;
+}
+
+.mvn-origin-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    padding: 0.2rem 0.5rem;
+    text-transform: uppercase;
+}
+
+.mvn-origin-chip.inherited {
+    background: #eef2f7;
+    border: 1px solid #cfd8e3;
+    color: #344054;
+}
+
+.mvn-editor-grid {
+    display: grid;
+    grid-template-columns: var(--mvn-view-definition-width, 490px) 10px minmax(0, 1fr);
+    gap: 0.5rem;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: visible;
+    align-items: stretch;
+}
+
+.mvn-view-editor,
+.mvn-column-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    overflow-y: visible;
+}
+
+.mvn-view-editor {
+    align-self: stretch;
+}
+
+.mvn-column-editor {
+    align-self: stretch;
+    overflow: visible;
+}
+
+.mvn-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.mvn-field-label {
+    color: var(--rz-primary);
+    font-size: 0.76rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 22px;
+}
+
+.mvn-view-definition-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 140px;
+    gap: 1rem;
+    align-items: end;
+}
+
+.mvn-check-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 40px;
+}
+
+.mvn-textarea {
+    box-sizing: border-box;
+    display: block;
+    inline-size: 100%;
+    min-width: 0;
+    max-width: 100%;
+    max-inline-size: 100%;
+    min-height: 100px;
+    overflow-y: scroll;
+    width: 100% !important;
+    resize: vertical !important;
+}
+
+::deep textarea.mvn-textarea,
+::deep .mvn-textarea textarea,
+::deep .mvn-field textarea.rz-textarea {
+    box-sizing: border-box !important;
+    display: block !important;
+    inline-size: 100% !important;
+    min-width: 0 !important;
+    min-height: 100px !important;
+    max-width: 100% !important;
+    max-inline-size: 100% !important;
+    overflow-y: scroll !important;
+    width: 100% !important;
+    resize: vertical !important;
+}
+
+.mvn-inheritance-check {
+    justify-content: space-between;
+    border: 0;
+    border-bottom: 1px solid #edf0f4;
+    border-radius: 0;
+    background: transparent;
+    padding: 0 0 0.85rem;
+}
+
+.mvn-inheritance-check .mvn-field-label {
+    color: #1f2d3d;
+    font-weight: 700;
+}
+
+::deep .mvn-check-field .rz-chkbox,
+::deep .mvn-check-field .rz-chkbox-box {
+    flex: 0 0 20px;
+    inline-size: 20px !important;
+    block-size: 20px !important;
+    min-width: 20px;
+    min-height: 20px;
+    width: 20px !important;
+    height: 20px !important;
+    opacity: 1 !important;
+}
+
+::deep .mvn-check-field .rz-chkbox-box {
+    border: 2px solid #1f2937 !important;
+    border-radius: 4px;
+    background: #fff !important;
+    box-shadow: 0 0 0 2px #eef3ff;
+}
+
+::deep .mvn-check-field .rz-chkbox.rz-state-disabled,
+::deep .mvn-check-field .rz-chkbox.rz-state-disabled .rz-chkbox-box,
+::deep .mvn-check-field .rz-chkbox.rz-state-disabled .rz-chkbox-icon {
+    cursor: default;
+    opacity: 1 !important;
+}
+
+::deep .mvn-check-field .rz-chkbox.rz-state-disabled .rz-chkbox-box {
+    border-color: #1f2937 !important;
+    background: #fff !important;
+    box-shadow: 0 0 0 2px #eef3ff;
+}
+
+::deep .mvn-check-field .rz-chkbox-box.rz-state-active,
+::deep .mvn-check-field .rz-chkbox-box.rz-state-highlight,
+::deep .mvn-check-field .rz-chkbox-box.rz-state-checked {
+    background: var(--rz-primary) !important;
+    border-color: #1f2937 !important;
+}
+
+.mvn-view-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    padding-top: 0.5rem;
+    border-top: 1px solid #edf0f4;
+}
+
+::deep .mvn-view-actions .rz-button {
+    min-height: 32px;
+    height: 32px;
+}
+
+.mvn-save-spinner {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 32px;
+    color: #526071;
+    font-size: 0.82rem;
+}
+
+.mvn-save-spinner-dot {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #c7cfda;
+    border-top-color: var(--rz-primary);
+    border-radius: 999px;
+    animation: mvn-spin 0.8s linear infinite;
+}
+
+@keyframes mvn-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.mvn-sync-compact {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f9fafc;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.65rem 0.75rem;
+}
+
+.mvn-sync-title {
+    color: var(--rz-primary);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mvn-sync-counts {
+    color: #263445;
+    font-size: 0.88rem;
+    margin-top: 0.2rem;
+    line-height: 1.25;
+    white-space: normal;
+}
+
+.mvn-column-grid {
+    display: grid;
+    grid-template-columns: var(--mvn-column-list-width, 390px) 10px minmax(0, 1fr);
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    align-items: stretch;
+    overflow: visible;
+}
+
+.mvn-column-list-panel,
+.mvn-column-detail-panel {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem;
+    gap: 0.75rem;
+    align-self: stretch;
+}
+
+.mvn-column-detail-panel {
+    max-width: 100%;
+    overflow: visible;
+    overflow-x: hidden;
+}
+
+.mvn-column-list {
+    overflow: auto;
+    min-height: 0;
+    height: auto;
+    max-height: calc(95vh - 390px);
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.mvn-column-fields {
+    display: grid;
+    gap: 0.9rem;
+    align-content: start;
+    overflow-x: hidden;
+    overflow-y: visible;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 auto;
+    padding-right: 0.25rem;
+}
+
+.mvn-inherited-source {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    border: 1px solid #e5eaf2;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 0.55rem 0.65rem;
+}
+
+.mvn-inherited-source span {
+    color: #667085;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mvn-inherited-source strong {
+    color: #233142;
+    font-size: 0.86rem;
+    font-weight: 700;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.mvn-column-item {
+    width: 100%;
+    border: 0;
+    border-left: 3px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    padding: 0.55rem 0.5rem;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.5rem;
+    text-align: left;
+    color: #233142;
+    cursor: pointer;
+}
+
+.mvn-column-item:hover {
+    background: #f5f7ff;
+}
+
+.mvn-column-item.selected {
+    border-left-color: var(--rz-primary);
+    background: #edf1ff;
+}
+
+.mvn-column-labels {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: grid;
+    gap: 0.1rem;
+    text-align: left;
+}
+
+.mvn-column-order,
+.mvn-column-ordinal {
+    display: none !important;
+}
+
+.mvn-column-labels strong,
+.mvn-column-labels span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mvn-column-labels span {
+    color: #5b6572;
+    font-size: 0.82rem;
+}
+
+.mvn-detail-label {
+    color: #6c757d;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 800;
+}
+
+.mvn-column-detail-header h3 {
+    margin: 0.15rem 0 0 0;
+    font-size: 1.25rem;
+}
+
+.mvn-selected-column-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.mvn-column-empty {
+    color: #6c757d;
+    padding: 2rem 1rem;
+    text-align: center;
+}
+
+::deep .mvn-field-label .rzi,
+::deep .mvn-field-label .rz-icon,
+::deep .mvn-column-list-header .rzi,
+::deep .mvn-column-list-header .rz-icon {
+    color: var(--rz-primary) !important;
+}
+
+@media (max-width: 1320px) {
+    .mvn-shell,
+    .mvn-editor-grid,
+    .mvn-column-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mvn-selector-panel {
+        height: auto;
+        max-height: none;
+        min-height: 520px;
+        position: static;
+    }
+
+    .mvn-resize-handle {
+        display: none;
+    }
+
+    .mvn-height-resize-handle {
+        display: none;
+    }
+
+    .manage-views-next {
+        overflow: auto;
+    }
+}
+
+@media (max-width: 1540px) {
+    .mvn-selected-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+    }
+}
+
+@media (max-width: 980px) {
+    .mvn-selected-header {
+        grid-template-columns: 1fr;
+    }
+}

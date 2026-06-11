@@ -1,0 +1,165 @@
+.tool-lab {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.tool-lab-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.tool-lab-header h1 {
+    margin: 0;
+    font-size: 1.55rem;
+}
+
+.tool-lab-header p {
+    margin: 0.15rem 0 0;
+    color: #526071;
+}
+
+.tool-lab-card {
+    border: 1px solid #d8dde6;
+}
+
+.tool-lab-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+
+.tool-runner {
+    display: flex;
+    align-items: end;
+    gap: 0.75rem;
+}
+
+.tool-picker {
+    width: min(420px, 100%);
+}
+
+.tool-options {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(90px, 140px);
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.tool-runner .rz-button {
+    min-width: 150px;
+}
+
+.tool-identity {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 1rem;
+    padding: 0.5rem;
+    border: 1px solid #d8dde6;
+    border-radius: 6px;
+    background: #f7f9fc;
+    color: #1f2937;
+}
+
+.tool-identity-label {
+    display: block;
+    margin-bottom: 0.15rem;
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.tool-identity strong {
+    font-size: 0.9rem;
+}
+
+.tool-identity-description,
+.tool-identity-parameters {
+    grid-column: 1 / -1;
+}
+
+.tool-identity code {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    border: 1px solid #d8dde6;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #0f172a;
+}
+
+.tool-lab-results {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: stretch;
+}
+
+.tool-lab-results h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+}
+
+.response-summary {
+    margin-bottom: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid #d8dde6;
+    border-radius: 4px;
+    background: #f7f9fc;
+    color: #1f2937;
+    font-weight: 600;
+}
+
+.tool-lab pre {
+    min-height: 220px;
+    max-height: 48vh;
+    overflow: auto;
+    margin: 0;
+    padding: 0.75rem;
+    border: 1px solid #d8dde6;
+    background: #101827;
+    color: #edf2ff;
+    font-size: 0.85rem;
+    line-height: 1.35;
+}
+
+.tool-lab .sql-output {
+    min-height: 480px;
+    max-height: 68vh;
+    background: #ffffff;
+    color: #0f172a;
+}
+
+.tool-lab-results > .tool-lab-card {
+    min-width: 0;
+}
+
+.tool-lab-results .rz-tabview,
+.tool-lab-results .rz-tabview-panels,
+.tool-lab-results .rz-tabview-panel {
+    min-width: 0;
+}
+
+@media (max-width: 1200px) {
+    .tool-lab-grid,
+    .tool-lab-results,
+    .tool-identity {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tool-runner {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .tool-options {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tool-picker {
+        width: 100%;
+    }
+}

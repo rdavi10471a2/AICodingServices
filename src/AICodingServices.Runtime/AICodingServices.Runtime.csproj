@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AICodingServices.Core\AICodingServices.Core.csproj" />
+    <ProjectReference Include="..\AICodingServices.Logging\AICodingServices.Logging.csproj" />
+    <ProjectReference Include="..\AICodingServices.Workflow\AICodingServices.Workflow.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

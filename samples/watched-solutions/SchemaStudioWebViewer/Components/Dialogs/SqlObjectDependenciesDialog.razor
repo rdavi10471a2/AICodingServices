@@ -1,0 +1,22 @@
+@using SchemaStudio.Data.Models
+
+<RadzenStack Gap="0.75rem" Style="height:100%; min-height:420px; padding:10px;">
+    <RadzenDataGrid Data="@Dependencies"
+                    TItem="SqlObjectDependency"
+                    AllowPaging="false"
+                    AllowFiltering="true"
+                    AllowColumnResize="true"
+                    FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                    Density="Density.Compact"
+                    Style="height:100%;">
+        <Columns>
+            @* 2026-04-22 06:23 PM CDT AI where-used dialog marker: keep the reverse dependency grid focused on the two fields people need to read. *@
+            <RadzenDataGridColumn TItem="SqlObjectDependency" Property="@nameof(SqlObjectDependency.Direction)" Title="Used By" Width="140px" />
+            <RadzenDataGridColumn TItem="SqlObjectDependency" Property="@nameof(SqlObjectDependency.FullName)" Title="Full Name" Width="760px" />
+        </Columns>
+    </RadzenDataGrid>
+</RadzenStack>
+
+@code {
+    [Parameter] public IReadOnlyList<SqlObjectDependency> Dependencies { get; set; } = Array.Empty<SqlObjectDependency>();
+}

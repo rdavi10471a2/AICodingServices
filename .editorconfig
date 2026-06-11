@@ -1,0 +1,6 @@
+root = true
+
+[*.cs]
+csharp_prefer_braces = true:error
+csharp_prefer_simple_using_statement = false:error
+dotnet_diagnostic.IDE0011.severity = error

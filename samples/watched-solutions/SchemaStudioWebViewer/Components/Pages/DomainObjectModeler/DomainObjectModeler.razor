@@ -1,0 +1,342 @@
+@page "/domain-object-modeler"
+
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudio.Data.Models
+@using SchemaStudio.Data.Repositories
+@using SchemaStudioWebViewer.Data
+@using SchemaStudioWebViewer.WEBSemanticModel.Services
+
+@inject DatabaseRepository DatabaseRepository
+@inject DatabaseDomainRepository DatabaseDomainRepository
+@inject SchemaObjectRepository SchemaObjectRepository
+@inject SchemaObjectColumnRepository SchemaObjectColumnRepository
+@inject ReadOnlyViewDefinitionRepository ReadOnlyViewDefinitionRepository
+@inject DatabaseRelationshipRepository DatabaseRelationshipRepository
+@inject TableSchemaSmoRepository TableSchemaRepository
+@inject IJSRuntime JSRuntime
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject TooltipService TooltipService
+
+@attribute [FileVersion("1.9")]
+@attribute [AIFileContext("Components/Pages/DomainObjectModeler/DomainObjectModeler.razor", "Domain object modeling page that composes an editable domain surface from selected managed base views.", Responsibilities = "Owns the /domain-object-modeler route and renders the database/domain selector, base-view checklist, anchor and alias controls, structured join rows, generated SQL preview, and page-level commands.", Nuances = "This page defines the editable object surface only. Field projection and trimming happen downstream in the domain object editor/projection workflow.", RelatedFiles = "DomainObjectModeler.razor.cs; DomainObjectModeler.Selection.cs; DomainObjectModeler.Joins.cs; DomainObjectModeler.Sql.cs; DomainObjectModeler.Models.cs; DomainObjectModeler.razor.css", LastReviewed = "2026-05-13")]
+
+<PageTitle>Domain Object Modeler</PageTitle>
+
+<div class="@DomainObjectModelerClass"
+     style="@PaneResizeStyle"
+     @onpointermove="@ResizePane"
+     @onpointerup="@EndPaneResize">
+    @if (IsBusy)
+    {
+        <div class="dom-busy-overlay" role="status" aria-live="polite">
+            <div class="dom-spinner"></div>
+            <div>Loading domain object modeler...</div>
+        </div>
+    }
+
+    <section class="dom-header">
+        <div>
+            <div class="dom-title-row">
+                <h1>Domain Object Modeler</h1>
+                <RadzenIcon Icon="help_outline"
+                            class="dom-page-help-icon"
+                            @onclick="@OpenHelpAsync" />
+            </div>
+            <p>Define an editable domain object surface by composing selected base views into one CTE-backed view.</p>
+        </div>
+        <div class="dom-header-actions">
+            <button type="button" class="dom-button secondary" @onclick="ToggleBaseViewPanel">@ToggleBaseViewPanelText</button>
+            <button type="button" class="dom-button secondary" @onclick="RefreshCatalogAsync" disabled="@IsBusy">Refresh Catalog</button>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(LoadError))
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat">
+            @LoadError
+        </RadzenAlert>
+    }
+
+        @if (!IsBaseViewPanelHidden)
+        {
+            <div class="dom-shell">
+            <aside class="dom-panel dom-base-panel">
+                <header class="dom-panel-header">
+                    <span>Base Views</span>
+                    <span class="dom-pill success">single domain</span>
+                </header>
+
+                <div class="dom-panel-body">
+                    <label class="dom-field">
+                        @FieldLabel(typeof(DatabaseDefinition), nameof(DatabaseDefinition.DatabaseName))
+                        <RadzenDropDown TValue="int?"
+                                        Data="@Databases"
+                                        TextProperty="DatabaseName"
+                                        ValueProperty="DatabaseId"
+                                        @bind-Value="@SelectedDatabaseId"
+                                        Change="@OnDatabaseChanged"
+                                        Disabled="@IsBusy"
+                                        Placeholder="Database"
+                                        Style="width:100%;" />
+                    </label>
+
+                    <label class="dom-field">
+                        @FieldLabel(typeof(DatabaseDomainDefinition), nameof(DatabaseDomainDefinition.Domain))
+                        <RadzenDropDown TValue="string"
+                                        Data="@Domains"
+                                        TextProperty="Domain"
+                                        ValueProperty="Domain"
+                                        @bind-Value="@SelectedDomain"
+                                        Change="@OnDomainChanged"
+                                        Disabled="@(IsBusy || !SelectedDatabaseId.HasValue)"
+                                        Placeholder="Domain"
+                                        Style="width:100%;" />
+                    </label>
+
+                    <div class="dom-hint">
+                        Select the managed base views that define this editable object surface. Composed views are intentionally excluded.
+                    </div>
+
+                    <div class="dom-tree">
+                        <div class="dom-tree-domain">v @(string.IsNullOrWhiteSpace(SelectedDomain) ? "Domain" : SelectedDomain)</div>
+                        <div class="dom-tree-folder">v Base Views</div>
+
+                        @if (BaseViews.Count == 0)
+                        {
+                            <div class="dom-empty">No base views loaded.</div>
+                        }
+                        else
+                        {
+                            @foreach (var item in BaseViews)
+                            {
+                                <label class="@(item.IsSelected ? "dom-tree-item selected" : "dom-tree-item")">
+                                    <input type="checkbox"
+                                           checked="@item.IsSelected"
+                                           @onchange="@(args => ToggleBaseView(item, ToBool(args.Value)))" />
+                                    <span>@item.DisplayName</span>
+                                    <span class="dom-pill">@(item.IsSelected ? "selected" : "optional")</span>
+                                </label>
+                            }
+                        }
+                    </div>
+                </div>
+
+                <footer class="dom-panel-note">Compose the editable object surface from managed base views.</footer>
+            </aside>
+                <button type="button"
+                        class="dom-resize-handle"
+                        title="Resize base views"
+                        aria-label="Resize base views"
+                        @onpointerdown="@(args => BeginPaneResize(ResizeTarget.BaseViews, args))"></button>
+                @WorkspaceContent
+            </div>
+        }
+        else
+        {
+            <div class="dom-shell dom-shell-collapsed">
+                @WorkspaceContent
+            </div>
+        }
+</div>
+
+@code {
+    private RenderFragment WorkspaceContent => @<main class="dom-workspace">
+            <section class="dom-workspace-header">
+                <div>
+                    <h2>Define Editable Object Surface</h2>
+                    <p>Selected base views become CTE blocks. Pick one anchor for the final FROM, then define joins against the named CTE aliases.</p>
+                </div>
+            </section>
+
+            <div class="dom-model-grid">
+                    <section class="dom-config-stack">
+                    <section class="dom-card">
+                        <header class="dom-card-header">
+                            <span>Output View</span>
+                            <span class="dom-pill success">editable surface</span>
+                        </header>
+                        <div class="dom-two-fields">
+                            <label class="dom-field">
+                                @HelpLabel("Target Schema", "Schema for the generated CREATE OR ALTER VIEW statement.")
+                                <input class="dom-native-input"
+                                       id="dom-modeler-target-schema"
+                                       @bind-value="TargetSchema"
+                                       @bind-value:event="oninput"
+                                       maxlength="128" />
+                            </label>
+                            <label class="dom-field">
+                                @HelpLabel("View Name", "Name of the composed domain object view generated from the selected base views.")
+                                <input class="dom-native-input"
+                                       id="dom-modeler-target-view"
+                                       @bind-value="TargetViewName"
+                                       @bind-value:event="oninput"
+                                       maxlength="256" />
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="dom-card dom-elements-card">
+                        <header class="dom-card-header">
+                            <span>Selected CTE Elements</span>
+                            <span class="dom-pill success">anchor + aliases + joins</span>
+                        </header>
+                        <div class="dom-element-list">
+                            @if (SelectedBaseViews.Count == 0)
+                            {
+                                <div class="dom-empty">Select at least one base view.</div>
+                            }
+                            else
+                            {
+                                <div class="dom-from-row">
+                                    <span class="dom-from-keyword">FROM</span>
+                                    <RadzenDropDown TValue="int?"
+                                                    Data="@SelectedBaseViews"
+                                                    TextProperty="@nameof(DomainBaseViewItem.DisplayName)"
+                                                    ValueProperty="@nameof(DomainBaseViewItem.SchemaObjectId)"
+                                                    Value="@AnchorView?.SchemaObjectId"
+                                                    Change="@OnAnchorChanged"
+                                                    Style="width:100%;" />
+                                    @if (AnchorView is not null)
+                                    {
+                                        <label class="dom-alias-field">
+                                            <span>Alias</span>
+                                            <input class="dom-native-input"
+                                                   value="@AnchorView.AliasName"
+                                                   @oninput="@(args => OnAliasInput(AnchorView, args))"
+                                                   maxlength="128" />
+                                        </label>
+                                        <label class="dom-source-mode-field">
+                                            <span>Source</span>
+                                            <RadzenDropDown TValue="string"
+                                                            Data="@CteSourceModes"
+                                                            TextProperty="@nameof(CteSourceModeOption.Text)"
+                                                            ValueProperty="@nameof(CteSourceModeOption.Value)"
+                                                            Value="@AnchorView.CteSourceMode"
+                                                            Change="@(value => OnCteSourceModeChanged(AnchorView, value?.ToString()))"
+                                                            Style="width:100%;" />
+                                        </label>
+                                    }
+                                </div>
+
+                                @foreach (var item in NonAnchorSelectedBaseViews)
+                                {
+                                    var row = FindJoinRow(item.SchemaObjectId);
+                                    <div class="dom-element-row">
+                                        <div class="dom-element-topline">
+                                            <div class="dom-order-controls">
+                                                <button type="button"
+                                                        class="dom-icon-button"
+                                                        title="Move up"
+                                                        aria-label="Move up"
+                                                        @onclick="@(args => MoveSelectedElement(item, -1))"
+                                                        disabled="@(GetJoinElementIndex(item) <= 0)">
+                                                    <RadzenIcon Icon="keyboard_arrow_up" />
+                                                </button>
+                                                <button type="button"
+                                                        class="dom-icon-button"
+                                                        title="Move down"
+                                                        aria-label="Move down"
+                                                        @onclick="@(args => MoveSelectedElement(item, 1))"
+                                                        disabled="@(GetJoinElementIndex(item) >= NonAnchorSelectedBaseViews.Count - 1)">
+                                                    <RadzenIcon Icon="keyboard_arrow_down" />
+                                                </button>
+                                            </div>
+                                            <span class="dom-source-name" title="@item.SourceFullName">@item.DisplayName</span>
+                                            <label class="dom-alias-field">
+                                                <span>Alias</span>
+                                                <input class="dom-native-input"
+                                                       value="@item.AliasName"
+                                                       @oninput="@(args => OnAliasInput(item, args))"
+                                                       maxlength="128" />
+                                            </label>
+                                            <label class="dom-source-mode-field">
+                                                <span>Source</span>
+                                                <RadzenDropDown TValue="string"
+                                                                Data="@CteSourceModes"
+                                                                TextProperty="@nameof(CteSourceModeOption.Text)"
+                                                                ValueProperty="@nameof(CteSourceModeOption.Value)"
+                                                                Value="@item.CteSourceMode"
+                                                                Change="@(value => OnCteSourceModeChanged(item, value?.ToString()))"
+                                                                Style="width:100%;" />
+                                            </label>
+                                        </div>
+
+                                        @if (row is not null)
+                                        {
+                                            <div class="dom-element-join">
+                                                <RadzenDropDown TValue="string"
+                                                                Data="@JoinTypes"
+                                                                Value="@row.JoinType"
+                                                                Change="@(value => OnJoinTypeChanged(row, value))"
+                                                                Style="width:100%;" />
+                                                <span class="dom-join-on">ON</span>
+                                                <textarea class="dom-native-input dom-join-clause-editor"
+                                                          value="@row.OnClause"
+                                                          @oninput="@(args => OnJoinClauseInput(row, args))"
+                                                          placeholder="ON clause"
+                                                          rows="3"
+                                                          maxlength="1200"></textarea>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <footer class="dom-card-footer">
+                            <div class="dom-footer-actions">
+                                <button type="button"
+                                        class="dom-button secondary"
+                                        @onclick="RefreshInferredJoinsAsync"
+                                        disabled="@(IsBusy || NonAnchorSelectedBaseViews.Count == 0)">
+                                    Infer Joins
+                                </button>
+                                <span class="dom-footer-note">Inferred joins are guesses from source database relationships. Please check them.</span>
+                                <span class="dom-completion-chip">@NonAnchorSelectedBaseViews.Count(item => !string.IsNullOrWhiteSpace(FindJoinRow(item.SchemaObjectId)?.OnClause)) of @NonAnchorSelectedBaseViews.Count complete</span>
+                            </div>
+                        </footer>
+                    </section>
+                </section>
+                <button type="button"
+                        class="dom-resize-handle"
+                        title="Resize CTE editor"
+                        aria-label="Resize CTE editor"
+                        @onpointerdown="@(args => BeginPaneResize(ResizeTarget.ElementEditor, args))"></button>
+                    <section class="dom-card dom-sql-card">
+                    <header class="dom-card-header">
+                        <span>Generated SQL Preview</span>
+                        <span class="dom-pill success">preview</span>
+                    </header>
+                    <div class="sql-code-container dom-sql-preview" @key="GeneratedSqlVersion">
+                        <pre class="language-sql"><code class="language-sql">@GeneratedSql</code></pre>
+                    </div>
+                    @if (IsCompositionJsonVisible)
+                    {
+                        <section class="dom-definition-json-panel">
+                            <header>
+                                <span>Composition Definition JSON</span>
+                                <span>saved with the view header</span>
+                            </header>
+                            <textarea class="dom-native-input dom-composition-json"
+                                      readonly
+                                      value="@CompositionDefinitionJsonPreview"
+                                      rows="7"></textarea>
+                        </section>
+                    }
+                    <footer class="dom-sql-actions">
+                        <span class="dom-status-text">@StatusMessage</span>
+                        <div class="dom-action-row">
+                            <button type="button" class="dom-button primary" @onclick="GenerateSqlAsync" disabled="@(!CanGenerate)">Generate</button>
+                            <button type="button" class="dom-button secondary" @onclick="SaveViewDefinitionAsync" disabled="@(!CanSaveViewDefinition)">Save View Definition</button>
+                            <button type="button" class="dom-button secondary" @onclick="ValidateSql" disabled="@string.IsNullOrWhiteSpace(GeneratedSql)">Validate</button>
+                            <button type="button" class="dom-button secondary" @onclick="RemoveCommentsAsync" disabled="@(SelectedBaseViews.Count == 0)">Remove Comments</button>
+                            <button type="button" class="dom-button secondary" @onclick="ToggleCompositionJson" disabled="@(SelectedBaseViews.Count == 0)">@ToggleCompositionJsonText</button>
+                            <button type="button" class="dom-button secondary" @onclick="CopySqlAsync" disabled="@string.IsNullOrWhiteSpace(GeneratedSql)">Copy</button>
+                        </div>
+                    </footer>
+                </section>
+            </div>
+        </main>;
+}

@@ -1,0 +1,958 @@
+﻿@page "/"
+
+@page "/kiosk"
+
+@page "/explore"
+
+@implements IDisposable
+
+@using SchemaStudio.AIHelpers
+@using SchemaStudioWebViewer.Configuration
+@using SchemaStudioWebViewer.Data
+@using SchemaStudioWebViewer.Models
+@using SchemaStudioWebViewer.Components
+@using SchemaStudioWebViewer.Components.Dialogs
+@using SchemaStudioWebViewer.Components.HelpSystem
+@using SchemaStudioWebViewer.Components.Layout
+@using SchemaStudioWebViewer.Utils
+@using SchemaStudioWebViewer.WEBSemanticModel.Services
+@using Radzen
+@using Radzen.Blazor
+
+@inject DialogService DialogService
+@inject NotificationService NotificationService
+@inject TooltipService TooltipService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager NavigationManager
+
+@attribute [FileVersion("1.13")]
+@attribute [AIChange("1.11", "2026-05-01 10:07 AM CDT delayed normal Home auth gating until session auth is loaded so menu navigation to Schema Explorer does not briefly render the login state.", AICommandStatus.Pending)]
+@attribute [AIChange("1.10", "2026-05-01 09:06 AM CDT notified the shared layout when simple login state changes so the top menu appears and hides immediately.", AICommandStatus.Pending)]
+@attribute [AIChange("1.9", "2026-04-23 10:10 AM CDT skipped the duplicate first-render database load on Home when startup already attempted it and no databases were loaded.", AICommandStatus.Pending)]
+@attribute [AIChange("1.8", "2026-04-23 10:00 AM CDT added an inline load-error alert on Home so failed database calls stay visible instead of relying on a toast alone.", AICommandStatus.Pending)]
+@attribute [AIChange("1.7", "2026-04-23 09:51 AM CDT added startup and selection-load error handling so failed database connections show a toast instead of hanging the Home page.", AICommandStatus.Pending)]
+@attribute [AIFileContext("Components/Pages/Home.razor", "Hosts the shared kiosk and normal home selection workflow, simple login state, persisted selection restoration, and the main schema object detail surface.")]
+@attribute [AIChange("1.6", "2026-04-22 11:51 AM CDT moved simple auth state to session-scoped browser storage so close, reload, or debug restart starts logged out.", AICommandStatus.Pending)]
+@attribute [AIChange("1.5", "2026-04-22 11:47 AM CDT added a login cancel action so the inline kiosk login panel can collapse without clearing the current selection.", AICommandStatus.Pending)]
+@attribute [AIChange("1.4", "2026-04-22 11:43 AM CDT redirected logout to the configured kiosk route after clearing auth and selected-view state.", AICommandStatus.Pending)]
+@attribute [AIChange("1.3", "2026-04-22 11:40 AM CDT stabilized kiosk/home route transitions and cleared view state on logout so stale details do not remain behind the login form.", AICommandStatus.Pending)]
+@attribute [AIChange("1.2", "2026-04-22 11:30 AM CDT added Auth.InDebug autofill for the temporary admin login form.", AICommandStatus.Pending)]
+@attribute [AIChange("1.1", "2026-04-22 11:26 AM CDT added simple admin login/logout controls and gated the normal Home route while leaving kiosk content shared.", AICommandStatus.Pending)]
+@attribute [AIChange("1.0", "2026-04-22 11:06 AM CDT added the /kiosk route alias so kiosk mode can load the Home view through layout policy.", AICommandStatus.Pending)]
+
+<style>
+    .view-label-blue {
+        color: var(--rz-primary) !important;
+        font-weight: 400 !important;
+        text-transform: uppercase !important;
+        font-size: 0.75rem !important;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 8px;
+        min-height: 24px;
+    }
+
+    .metadata-scroll-box {
+        background-color: #f6f8f9 !important;
+        border: 1px solid #dee2e6 !important;
+        border-radius: 4px;
+        padding: 10px;
+        height: 120px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        width: 100%;
+        font-family: var(--rz-text-font-family) !important;
+        font-size: 0.875rem !important;
+        color: #495057;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    .header-text-bold {
+        font-weight: 600 !important;
+        color: #000 !important;
+    }
+
+    .flex-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .grid-wrapper {
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+    }
+
+    .section-header {
+        color: var(--rz-primary);
+        font: 14pt;
+        font-weight:bold;
+        margin-bottom: 12px;
+       /* border-bottom: 2px solid var(--rz-primary);*/
+        padding-bottom: 4px;
+    }
+
+    .login-panel {
+        max-width: 420px;
+        margin: 1rem auto;
+    }
+
+    .login-error {
+        color: #b32121;
+        font-weight: 600;
+        margin-top: .5rem;
+    }
+</style>
+
+@* 2026-04-23 10:10 AM CDT AI v1.9 startup-retry marker: first render now skips the duplicate database load when startup already tried and failed to populate the database list. *@
+@* 2026-04-23 10:00 AM CDT AI v1.8 inline-error marker: Home now keeps a visible load-error alert on the page so failed database calls are obvious even after the toast fades. *@
+@* 2026-04-23 09:51 AM CDT AI v1.7 startup-error marker: catch initial repository failures on Home and always unwind loading state so broken DB connections show a toast instead of hanging the page. *@
+@* 2026-04-22 11:51 AM CDT AI v1.6 auth-session marker: simple auth uses session storage so browser close/reload/debug restart begins logged out. *@
+@* 2026-04-22 11:47 AM CDT AI v1.5 login cancel marker: cancel collapses the inline login panel without disturbing the current kiosk selection. *@
+@* 2026-04-22 11:43 AM CDT AI v1.4 logout redirect marker: logout clears state and returns the user to the configured kiosk route. *@
+@* 2026-04-22 11:40 AM CDT AI v1.3 route/logout marker: route changes refresh auth gating and logout clears stale selected-view state. *@
+@* 2026-04-22 11:30 AM CDT AI v1.2 debug autofill marker: Auth.InDebug can prefill the temporary admin credentials for local testing. *@
+@* 2026-04-22 11:26 AM CDT AI v1.1 login marker: the shared Home component gates only the normal route and lets kiosk login flow return to /. *@
+@* 2026-04-22 11:06 AM CDT AI v1.0 kiosk route marker: /kiosk intentionally renders the same Home workflow while MainLayout decides whether navigation chrome is shown. *@
+<PageTitle>Choose View</PageTitle>
+
+<RadzenCard Variant="Variant.Flat" Class="rz-p-2 rz-mb-2">
+
+    <RadzenRow Class="rz-mb-2 rz-px-1">
+
+        <RadzenColumn Size="8">
+            <RadzenText TextStyle="TextStyle.Caption"
+                        Style="color:#212529;font-weight:700;font-style:normal;">
+                Choose a source Database, Business Domain, and view to see its details.
+            </RadzenText>
+        </RadzenColumn>
+
+        <RadzenColumn Size="4">
+            <RadzenStack Orientation="Orientation.Horizontal"
+                         AlignItems="AlignItems.Center"
+                         JustifyContent="JustifyContent.End"
+                         Gap="0.5rem">
+                @if (!IsWaitingForAuthState)
+                {
+                    <RadzenButton Size="ButtonSize.Small"
+                                  Variant="Variant.Text"
+                                  Icon="@(IsAuthenticated ? "logout" : "login")"
+                                  Text="@(IsAuthenticated ? "Logout" : "Login")"
+                                  Click="@OnAuthButtonClick" />
+                }
+                <RadzenIcon Icon="help_outline"
+                            Style="cursor:help;color:var(--rz-primary);font-size:1.25rem;"
+                            @onclick="@(() => OpenHelp("system-overview"))"
+                            @ondblclick="@EnterAdminMode" />
+            </RadzenStack>
+        </RadzenColumn>
+
+    </RadzenRow>
+
+    @if (CanShowHomeContent)
+    {
+    <RadzenRow Gap="0.5rem" AlignItems="AlignItems.Center">
+@* 
+        <RadzenColumn Size="12" SizeMD="2">
+            <RadzenText TextStyle="TextStyle.H6" Class="rz-m-0 header-text-bold">
+                CHOOSE VIEW
+            </RadzenText>
+        </RadzenColumn> *@
+
+        <RadzenColumn Size="12" SizeMD="3">
+            <div class="rz-display-flex rz-align-items-center">
+                <RadzenIcon Icon="info"
+                            Class="rz-mr-2"
+                            Style="cursor:pointer;color:var(--rz-info);"
+                            @onclick="@(() => OpenHelp("explore-databases"))" />
+
+                <RadzenDropDown Data="@Databases"
+                                TextProperty="DatabaseName"
+                                ValueProperty="DatabaseId"
+                                Placeholder="Database"
+                                @bind-Value="@SelectedDatabaseId"
+                                Change="@OnDatabaseChanged"
+                                Style="width:100%;"
+                                AllowClear="true" />
+            </div>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="3">
+            <RadzenDropDown Data="@Domains"
+                            TextProperty="Domain"
+                            ValueProperty="Domain"
+                            Placeholder="Business Domain"
+                            @bind-Value="@SelectedDomain"
+                            Change="@OnDomainChanged"
+                            Disabled="@(!SelectedDatabaseId.HasValue)"
+                            Style="width:100%;"
+                            AllowClear="true" />
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="4">
+            <RadzenDropDown Data="@DisplayObjects"
+                            TextProperty="DisplayName"
+                            ValueProperty="SchemaObjectId"
+                            Placeholder="View"
+                            @bind-Value="@SelectedObjectId"
+                            Change="@OnObjectChanged"
+                            Disabled="@string.IsNullOrWhiteSpace(SelectedDomain)"
+                            Style="width:100%;"
+                            AllowClear="true">
+
+                <Template Context="obj">
+                    @{
+                        var item = obj as DisplaySchemaObject;
+                    }
+
+                    @if (item?.IsHeader == true)
+                    {
+                        <div style="font-weight:700;color:#888;background:#f5f5f5;padding:.35rem .5rem;">
+                            @item.DisplayName
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="rz-display-flex rz-align-items-center" style="gap:.5rem;">
+                            @if (item?.IsBaseObject == true)
+                            {
+                                <RadzenIcon Icon="layers"
+                                            Style="font-size:14px;color:var(--rz-primary);" />
+                            }
+
+                            <span>@item?.DisplayName</span>
+                        </div>
+                    }
+                </Template>
+            </RadzenDropDown>
+        </RadzenColumn>
+
+    </RadzenRow>
+    }
+</RadzenCard>
+
+@if (ShowLoginPanel)
+{
+    <RadzenCard Variant="Variant.Flat" Class="login-panel rz-p-4">
+        <RadzenStack Gap="0.75rem">
+            <RadzenText TextStyle="TextStyle.H6" Class="rz-m-0">Login</RadzenText>
+            <RadzenTextBox Placeholder="Username"
+                           @bind-Value="@LoginUserName"
+                           Style="width:100%;" />
+            <input class="rz-textbox" type="password" placeholder="Password" @bind="LoginPassword" style="width:100%;" />
+            <RadzenStack Orientation="Orientation.Horizontal"
+                         AlignItems="AlignItems.Center"
+                         JustifyContent="JustifyContent.End"
+                         Gap="0.5rem">
+                <RadzenButton Icon="close"
+                              Text="Cancel"
+                              ButtonStyle="ButtonStyle.Light"
+                              Click="@CancelLogin" />
+                <RadzenButton Icon="login"
+                              Text="Login"
+                              Click="@LoginAsync" />
+            </RadzenStack>
+            @if (!string.IsNullOrWhiteSpace(LoginError))
+            {
+                <div class="login-error">@LoginError</div>
+            }
+        </RadzenStack>
+    </RadzenCard>
+}
+
+@if (CanShowHomeContent && !string.IsNullOrWhiteSpace(LoadError))
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger"
+                 Variant="Variant.Flat"
+                 class="rz-mb-2">
+        @LoadError
+    </RadzenAlert>
+}
+
+@if (CanShowHomeContent && IsLoading)
+{
+    <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" Class="rz-mb-2" />
+}
+
+@if (CanShowHomeContent && SelectedObject != null)
+{
+    <div class="section-header">
+        VIEW DETAILS
+    </div>
+
+    <RadzenCard Variant="Variant.Filled"
+                Class="rz-mb-4 rz-p-3"
+                Style="background-color:#ffffff;;"
+                 >
+
+        <RadzenRow Gap="1rem">
+
+            <RadzenColumn Size="12" SizeMD="3">
+                <div class="view-label-blue">
+                    @ReflectionUtils.GetDisplayName(typeof(SchemaObjectModel), "BusinessName")
+                    <RadzenIcon Icon="help_outline"
+                                MouseEnter="@(args => TooltipService.Open(args,ReflectionUtils.GetDescription(typeof(SchemaObjectModel), "BusinessName")))" />
+            </div>
+
+                <RadzenText Style="font-size:14pt; font-weight:bold;">
+                    @SelectedObject.BusinessName
+                </RadzenText>
+
+            </RadzenColumn>
+
+            <RadzenColumn Size="12" SizeMD="4">
+                <div class="view-label-blue">
+                    @ReflectionUtils.GetDisplayName(typeof(SchemaObjectModel), "BusinessDescription")
+                    <RadzenIcon Icon="help_outline"
+                                MouseEnter="@(args => TooltipService.Open(args,
+                                                                                            ReflectionUtils.GetDescription(typeof(SchemaObjectModel), "BusinessDescription")))" />
+            </div>
+
+            <div class="metadata-scroll-box">
+                @SelectedObject.BusinessDescription
+            </div>
+        </RadzenColumn>
+
+        <RadzenColumn Size="12" SizeMD="5">
+            <div class="view-label-blue">
+                @ReflectionUtils.GetDisplayName(typeof(SchemaObjectModel), "DeveloperNotes")
+                <RadzenIcon Icon="help_outline"
+                            MouseEnter="@(args => TooltipService.Open(args,
+                                                                                            ReflectionUtils.GetDescription(typeof(SchemaObjectModel), "DeveloperNotes")))" />
+            </div>
+
+            <div class="metadata-scroll-box">
+                @SelectedObject.DeveloperNotes
+            </div>
+        </RadzenColumn>
+
+    </RadzenRow>
+
+</RadzenCard>
+
+<div class="grid-wrapper">
+
+    <RadzenDataGrid Data="@Columns"
+                    TItem="SchemaObjectColumnModel"
+                    AllowPaging="false"
+                    AllowFiltering="true"
+                    FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                    Density="Density.Compact"
+                    Style="height:500px;"
+                    RowDoubleClick="@(args => OpenRowDetails(args.Data))">
+
+        <HeaderTemplate>
+            <div class="section-header" style="margin-bottom:0;">
+                COLUMN DETAILS -- DOUBLE CLICK TO SEE MORE
+            </div>
+        </HeaderTemplate>
+
+        <Columns>
+
+            <RadzenDataGridColumn TItem="SchemaObjectColumnModel"
+                                  Property="OrdinalPosition"
+                                  Width="125px">
+                <HeaderTemplate>
+                    <div class="view-label-blue">
+                        @ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnModel), "OrdinalPosition")
+                        <RadzenIcon Icon="help_outline"
+                                    MouseEnter="@(args => TooltipService.Open(args,
+                                                                                                                    ReflectionUtils.GetDescription(typeof(SchemaObjectColumnModel), "OrdinalPosition")))" />
+                    </div>
+                </HeaderTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="SchemaObjectColumnModel" Property="SourceColumnName">
+                <HeaderTemplate>
+                    <div class="view-label-blue">
+                        @ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnModel), "SourceColumnName")
+                        <RadzenIcon Icon="help_outline"
+                                    MouseEnter="@(args => TooltipService.Open(args,
+                                                                                                                    ReflectionUtils.GetDescription(typeof(SchemaObjectColumnModel), "SourceColumnName")))" />
+                    </div>
+                </HeaderTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="SchemaObjectColumnModel" Property="BusinessName">
+                <HeaderTemplate>
+                    <div class="view-label-blue">
+                        @ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnModel), "BusinessName")
+                        <RadzenIcon Icon="help_outline"
+                                    MouseEnter="@(args => TooltipService.Open(args,
+                                                                                                                    ReflectionUtils.GetDescription(typeof(SchemaObjectColumnModel), "BusinessName")))" />
+                    </div>
+                </HeaderTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="SchemaObjectColumnModel" Property="BusinessDescription">
+                <HeaderTemplate>
+                    <div class="view-label-blue">
+                        @ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnModel), "BusinessDescription")
+                        <RadzenIcon Icon="help_outline"
+                                    MouseEnter="@(args => TooltipService.Open(args,
+                                                                                                                    ReflectionUtils.GetDescription(typeof(SchemaObjectColumnModel), "BusinessDescription")))" />
+                    </div>
+                </HeaderTemplate>
+            </RadzenDataGridColumn>
+
+            <RadzenDataGridColumn TItem="SchemaObjectColumnModel" Property="DeveloperNotes">
+                <HeaderTemplate>
+                    <div class="view-label-blue">
+                        @ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnModel), "DeveloperNotes")
+                        <RadzenIcon Icon="help_outline"
+                                    MouseEnter="@(args => TooltipService.Open(args,
+                                                                                                                    ReflectionUtils.GetDescription(typeof(SchemaObjectColumnModel), "DeveloperNotes")))" />
+                    </div>
+                </HeaderTemplate>
+            </RadzenDataGridColumn>
+
+        </Columns>
+
+    </RadzenDataGrid>
+
+</div>
+}
+@code {
+
+    private List<DatabaseModel> Databases = new();
+    private List<DatabaseDomainModel> Domains = new();
+    private List<DisplaySchemaObject> DisplayObjects = new();
+    private List<SchemaObjectColumnModel> Columns = new();
+
+    private int? SelectedDatabaseId;
+    private string SelectedDomain = "";
+    private int? SelectedObjectId;
+    private int? LastValidObjectId;
+
+    private SchemaObjectModel? SelectedObject;
+
+    private bool IsLoading = false;
+    private bool IsAuthenticated = false;
+    private bool IsAuthStateLoaded = false;
+    private bool IsLoginFormVisible = false;
+    private string LoginUserName = "";
+    private string LoginPassword = "";
+    private string LoginError = "";
+    private string LoadError = "";
+    private bool HasAttemptedInitialDatabaseLoad = false;
+
+    private const string AuthStorageKey = "simpleAuth";
+    private const string AuthenticatedValue = "true";
+    private const string AdminUserName = "admin";
+    private const string AdminPassword = "admin123";
+
+    private ReadOnlyDatabaseRepository DbRepo =
+        new(AppConfig.Current.ConnectionStrings.DefaultConnection);
+
+    private ReadOnlySchemaObjectRepository SchemaRepo =
+        new(AppConfig.Current.ConnectionStrings.DefaultConnection);
+
+    private ReadOnlyViewDefinitionRepository ViewRepo =
+        new(AppConfig.Current.ConnectionStrings.DefaultConnection);
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (CanShowHomeContent)
+            {
+                HasAttemptedInitialDatabaseLoad = true;
+                await EnsureDatabasesLoadedAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            NotifyLoadFailure("Database load failed", ex);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        await Task.Delay(100);
+
+        await RefreshRouteStateAsync();
+    }
+
+    private bool IsKioskRoute =>
+        string.IsNullOrWhiteSpace(CurrentRelativePath) ||
+        string.Equals(CurrentRelativePath, AppConfig.Current.Kiosk.Route.Trim('/'), StringComparison.OrdinalIgnoreCase);
+
+    private bool IsNormalHomeRoute => string.Equals(CurrentRelativePath, "explore", StringComparison.OrdinalIgnoreCase);
+
+    private bool RequiresNormalHomeAuth =>
+        AppConfig.Current.Auth.Enabled &&
+        AppConfig.Current.Auth.RequireLoginForHome &&
+        IsNormalHomeRoute;
+
+    private bool IsWaitingForAuthState =>
+        RequiresNormalHomeAuth &&
+        !IsAuthStateLoaded;
+
+    private bool ShouldBlockNormalHome =>
+        RequiresNormalHomeAuth &&
+        IsAuthStateLoaded &&
+        !IsAuthenticated;
+
+    private bool ShowLoginPanel => !IsWaitingForAuthState && (IsLoginFormVisible || ShouldBlockNormalHome);
+
+    private bool CanShowHomeContent => !IsWaitingForAuthState && !ShouldBlockNormalHome;
+
+    private string CurrentRelativePath
+    {
+        get
+        {
+            var relative = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+            var queryIndex = relative.IndexOf('?', StringComparison.Ordinal);
+            return (queryIndex >= 0 ? relative[..queryIndex] : relative).Trim('/');
+        }
+    }
+
+    private async Task LoadAuthStateAsync()
+    {
+        var authValue = await JSRuntime.InvokeAsync<string>("authStateManager.load", AuthStorageKey);
+        IsAuthenticated = string.Equals(authValue, AuthenticatedValue, StringComparison.OrdinalIgnoreCase);
+        IsAuthStateLoaded = true;
+        IsLoginFormVisible = ShouldBlockNormalHome;
+        AutofillDebugCredentials();
+    }
+
+    private async Task RefreshRouteStateAsync()
+    {
+        try
+        {
+            await LoadAuthStateAsync();
+
+            if (!CanShowHomeContent)
+            {
+                ClearChildSelections();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            if (!Databases.Any() && HasAttemptedInitialDatabaseLoad)
+            {
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            await EnsureDatabasesLoadedAsync();
+            await LoadStateAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            NotifyLoadFailure("Home load failed", ex);
+            ClearChildSelections();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task EnsureDatabasesLoadedAsync()
+    {
+        HasAttemptedInitialDatabaseLoad = true;
+        if (!Databases.Any())
+        {
+            Databases = await DbRepo.GetAllAsync();
+            LoadError = "";
+        }
+    }
+
+    private async Task LoadStateAsync()
+    {
+        LoadError = "";
+        var dbStr = await JSRuntime.InvokeAsync<string>("stateManager.load", "dbId");
+        var dom = await JSRuntime.InvokeAsync<string>("stateManager.load", "dom");
+        var objStr = await JSRuntime.InvokeAsync<string>("stateManager.load", "objId");
+
+        if (!int.TryParse(dbStr, out var dbId))
+            return;
+
+        SelectedDatabaseId = dbId;
+        Domains = await DbRepo.GetDomainsAsync(dbId);
+
+        if (!string.IsNullOrWhiteSpace(dom))
+        {
+            SelectedDomain = dom;
+
+            var raw = await SchemaRepo.GetByDatabaseAsync(dbId);
+
+            var filtered = raw.Where(x => x.Domain == SelectedDomain)
+                              .OrderByDescending(x => x.IsBaseObject)
+                              .ThenBy(x => x.BusinessName)
+                              .ToList();
+
+            var baseItems = filtered.Where(x => x.IsBaseObject).ToList();
+            var derivedItems = filtered.Where(x => !x.IsBaseObject).ToList();
+
+            DisplayObjects.Clear();
+
+            DisplayObjects.Add(new DisplaySchemaObject
+            {
+                SchemaObjectId = -1,
+                DisplayName = "━━ BASE OBJECTS ━━",
+                IsHeader = true
+            });
+
+            DisplayObjects.AddRange(baseItems.Select(x => new DisplaySchemaObject
+            {
+                SchemaObjectId = x.SchemaObjectId,
+                DisplayName = x.BusinessName,
+                IsBaseObject = true
+            }));
+
+            if (derivedItems.Any())
+            {
+                DisplayObjects.Add(new DisplaySchemaObject
+                {
+                    SchemaObjectId = -2,
+                    DisplayName = "━━ DERIVED VIEWS ━━",
+                    IsHeader = true
+                });
+
+                DisplayObjects.AddRange(derivedItems.Select(x => new DisplaySchemaObject
+                {
+                    SchemaObjectId = x.SchemaObjectId,
+                    DisplayName = x.BusinessName,
+                    IsBaseObject = false
+                }));
+            }
+        }
+
+        if (int.TryParse(objStr, out var objId) && objId > 0)
+        {
+            SelectedObjectId = objId;
+            LastValidObjectId = objId;
+
+            IsLoading = true;
+            try
+            {
+                SelectedObject = await SchemaRepo.GetByIdAsync(objId);
+                Columns = await SchemaRepo.GetColumnsAsync(objId);
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnAuthButtonClick()
+    {
+        if (IsAuthenticated)
+        {
+            await LogoutAsync();
+            return;
+        }
+
+        LoginError = "";
+        IsLoginFormVisible = true;
+        AutofillDebugCredentials();
+    }
+
+    private void AutofillDebugCredentials()
+    {
+        if (!AppConfig.Current.Auth.InDebug || IsAuthenticated)
+            return;
+
+        LoginUserName = AdminUserName;
+        LoginPassword = AdminPassword;
+    }
+
+    private void CancelLogin()
+    {
+        IsLoginFormVisible = false;
+        LoginUserName = "";
+        LoginPassword = "";
+        LoginError = "";
+    }
+
+    private async Task LoginAsync()
+    {
+        if (!string.Equals(LoginUserName, AdminUserName, StringComparison.Ordinal) ||
+            !string.Equals(LoginPassword, AdminPassword, StringComparison.Ordinal))
+        {
+            LoginError = "Invalid username or password.";
+            return;
+        }
+
+        IsAuthenticated = true;
+        IsAuthStateLoaded = true;
+        IsLoginFormVisible = false;
+        LoginError = "";
+        LoginPassword = "";
+
+        await JSRuntime.InvokeVoidAsync("authStateManager.save", AuthStorageKey, AuthenticatedValue);
+        await MainLayout.NotifyAuthenticationChangedAsync();
+
+        if (IsKioskRoute)
+        {
+            NavigationManager.NavigateTo("/explore");
+            return;
+        }
+
+        try
+        {
+            await EnsureDatabasesLoadedAsync();
+            await LoadStateAsync();
+        }
+        catch (Exception ex)
+        {
+            NotifyLoadFailure("Home load failed", ex);
+        }
+    }
+
+    private async Task LogoutAsync()
+    {
+        IsAuthenticated = false;
+        IsAuthStateLoaded = true;
+        IsLoginFormVisible = ShouldBlockNormalHome;
+        LoginUserName = "";
+        LoginPassword = "";
+        LoginError = "";
+        ClearChildSelections();
+
+        await ClearPersistedSelectionStateAsync();
+
+        await JSRuntime.InvokeVoidAsync("authStateManager.clear", AuthStorageKey);
+        await MainLayout.NotifyAuthenticationChangedAsync();
+
+        NavigationManager.NavigateTo(AppConfig.Current.Kiosk.Route);
+    }
+
+    private async Task SaveStateAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "dbId", SelectedDatabaseId?.ToString());
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "dom", SelectedDomain);
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "objId", SelectedObjectId?.ToString());
+    }
+
+    private async Task ClearPersistedSelectionStateAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "dbId", "");
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "dom", "");
+        await JSRuntime.InvokeVoidAsync("stateManager.save", "objId", "");
+    }
+
+    private async Task OnDatabaseChanged(object value)
+    {
+        if (!int.TryParse(value?.ToString(), out var dbId))
+            return;
+
+        SelectedDatabaseId = dbId;
+
+        ClearChildSelections(true);
+        LoadError = "";
+
+        try
+        {
+            Domains = await DbRepo.GetDomainsAsync(dbId);
+            await SaveStateAsync();
+        }
+        catch (Exception ex)
+        {
+            Domains.Clear();
+            NotifyLoadFailure("Domain load failed", ex);
+        }
+    }
+
+    private async Task OnDomainChanged(object value)
+    {
+        SelectedDomain = value?.ToString() ?? "";
+        LoadError = "";
+
+        DisplayObjects.Clear();
+        SelectedObjectId = null;
+        LastValidObjectId = null;
+        SelectedObject = null;
+        Columns.Clear();
+
+        if (SelectedDatabaseId.HasValue &&
+            !string.IsNullOrWhiteSpace(SelectedDomain))
+        {
+            try
+            {
+                var raw = await SchemaRepo.GetByDatabaseAsync(SelectedDatabaseId.Value);
+
+                var filtered = raw.Where(x => x.Domain == SelectedDomain)
+                                  .OrderByDescending(x => x.IsBaseObject)
+                                  .ThenBy(x => x.BusinessName)
+                                  .ToList();
+
+                var baseItems = filtered.Where(x => x.IsBaseObject).ToList();
+                var derivedItems = filtered.Where(x => !x.IsBaseObject).ToList();
+
+                DisplayObjects.Add(new DisplaySchemaObject
+                {
+                    SchemaObjectId = -1,
+                    DisplayName = "━━ BASE OBJECTS ━━",
+                    IsHeader = true
+                });
+
+                DisplayObjects.AddRange(baseItems.Select(x => new DisplaySchemaObject
+                {
+                    SchemaObjectId = x.SchemaObjectId,
+                    DisplayName = x.BusinessName,
+                    IsBaseObject = true
+                }));
+
+                if (derivedItems.Any())
+                {
+                    DisplayObjects.Add(new DisplaySchemaObject
+                    {
+                        SchemaObjectId = -2,
+                        DisplayName = "━━ DERIVED VIEWS ━━",
+                        IsHeader = true
+                    });
+
+                    DisplayObjects.AddRange(derivedItems.Select(x => new DisplaySchemaObject
+                    {
+                        SchemaObjectId = x.SchemaObjectId,
+                        DisplayName = x.BusinessName,
+                        IsBaseObject = false
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                NotifyLoadFailure("Object load failed", ex);
+            }
+        }
+
+        await SaveStateAsync();
+    }
+
+
+
+    private async Task OnObjectChanged(object value)
+    {
+        if (!int.TryParse(value?.ToString(), out var objId))
+        {
+            SelectedObjectId = null;
+            LastValidObjectId = null;
+            SelectedObject = null;
+            Columns.Clear();
+            await SaveStateAsync();
+            return;
+        }
+
+        if (objId <= 0)
+        {
+            SelectedObjectId = LastValidObjectId;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        SelectedObjectId = objId;
+        LastValidObjectId = objId;
+        LoadError = "";
+
+        IsLoading = true;
+
+        try
+        {
+            SelectedObject = await SchemaRepo.GetByIdAsync(objId);
+            Columns = await SchemaRepo.GetColumnsAsync(objId);
+
+            await SaveStateAsync();
+        }
+        catch (Exception ex)
+        {
+            SelectedObject = null;
+            Columns.Clear();
+            NotifyLoadFailure("Column load failed", ex);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+
+
+    private void ClearChildSelections(bool keepDb = false)
+    {
+        if (!keepDb)
+        {
+            SelectedDatabaseId = null;
+            Domains.Clear();
+        }
+
+        SelectedDomain = "";
+        DisplayObjects.Clear();
+        SelectedObjectId = null;
+        LastValidObjectId = null;
+        SelectedObject = null;
+        Columns.Clear();
+        LoadError = "";
+    }
+
+    private async Task OpenHelp(string id)
+    {
+        await DialogService.OpenAsync<HelpDialog>(
+            "Schema Studio Help Console",
+            new Dictionary<string, object>
+            {
+            { "Databases", Databases },
+            { "InitialSubjectId", id }
+            },
+            new DialogOptions()
+            {
+                Width = "1200px",
+                Height = "800px",
+                Resizable = true,
+                Draggable = true
+            });
+    }
+
+    private async Task OpenRowDetails(SchemaObjectColumnModel col)
+    {
+        await DialogService.OpenAsync<DynamicDetailForm>(
+            $"Details: {col.SourceColumnName}",
+            new Dictionary<string, object>
+            {
+            { "Model", col }
+            },
+            new DialogOptions()
+            {
+                Width = "900px",
+                Height = "800px",
+                Resizable = true,
+                Draggable = true
+            });
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = InvokeAsync(RefreshRouteStateAsync);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+
+    private void NotifyLoadFailure(string summary, Exception ex)
+    {
+        LoadError = ex.Message;
+        NotificationService.Notify(NotificationSeverity.Error, summary, ex.Message, 5000);
+    }
+
+    private Task EnterAdminMode()
+    {
+        NavigationManager.NavigateTo("/help-editor");
+        return Task.CompletedTask;
+    }
+}

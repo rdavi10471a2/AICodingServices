@@ -1,0 +1,621 @@
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudio.Data.Models
+@using SchemaStudioWebViewer.WEBSemanticModel.Model
+
+@inject DialogService DialogService
+
+@attribute [FileVersion("1.1")]
+@attribute [AIFileContext("Components/Dialogs/ColumnMergeReviewDialog.razor", "Focused Manage Views Next merge-review dialog for parser column metadata. The dialog compares parser-owned bootstrap metadata with saved Schema Studio columns, stages accepted choices into the caller's in-memory column list, and leaves final persistence to the main Manage Views Next Save All Changes action.", Responsibilities = "Owns merge candidate filtering, parsed-vs-saved field comparison, effective-result preview, and Apply Merge staging for accepted parser values only.", Nuances = "DeveloperNotes are intentionally excluded from this merge surface because they are user-owned app metadata. Added rows auto-use parsed metadata, removed rows are informational, and changed/conflict rows default to keeping saved values. Keep Saved means an existing saved column is not modified; Use Parsed refreshes parser structure and parser-owned metadata from the current runtime parse.", RelatedFiles = "Components/Pages/ManageViewsNext/ManageViewsNext.razor; Components/Pages/ManageViewsNext/README.md", LastReviewed = "2026-05-03")]
+
+@* Fragment References:
+   - None. Leaf dialog styled by Components/Dialogs/ColumnMergeReviewDialog.razor.css.
+*@
+
+<div class="column-merge-review">
+    <header class="cmr-header">
+        <div class="cmr-title-row">
+            <h2>Column Merge Review</h2>
+            @HelpIcon("Review parser-detected column metadata before applying it to the current Manage Views working state.")
+        </div>
+    </header>
+
+    <section class="cmr-filter-band">
+        <div class="cmr-view-name">
+            <strong>@ViewDisplayName</strong>
+            @if (IsBaseView)
+            {
+                <span class="cmr-view-chip">Base</span>
+            }
+        </div>
+
+        <RadzenTextBox @bind-Value="@SearchText"
+                       Placeholder="Search columns..."
+                       class="cmr-search"
+                       Change="@(_ => SelectFirstFilteredCandidate())" />
+
+        <div class="cmr-status-select">
+            <span>Status</span>
+            <RadzenDropDown Data="@StatusOptions"
+                            @bind-Value="@StatusFilter"
+                            Change="@(_ => SelectFirstFilteredCandidate())"
+                            Style="width: 150px;" />
+        </div>
+
+        <div class="cmr-counts" aria-label="Merge candidate counts">
+            @foreach (var count in CountChips)
+            {
+                <button type="button"
+                        class="@GetCountChipClass(count.Status)"
+                        @onclick="@(() => SetStatusFilter(count.Status))">
+                    <span>@count.Label</span>
+                    <strong>@count.Count</strong>
+                </button>
+            }
+        </div>
+    </section>
+
+    @if (Candidates.Count == 0)
+    {
+        <div class="cmr-empty">
+            No parser columns are available for merge review.
+        </div>
+    }
+    else if (SelectedCandidate == null)
+    {
+        <div class="cmr-empty">
+            No columns match the current filter.
+        </div>
+    }
+    else
+    {
+        <main class="cmr-body">
+            <section class="cmr-grid-card">
+                <div class="cmr-card-header">
+                    <div class="cmr-heading-group">
+                        <h3>Metadata Choices: @SelectedCandidate.ColumnName</h3>
+                        @HelpIcon("Only user-mergeable metadata appears here.")
+                        <span class="@GetStatusBadgeClass(SelectedCandidate.Status)">@SelectedCandidate.StatusLabel</span>
+                    </div>
+
+                    <div class="cmr-navigator">
+                        <RadzenButton Icon="chevron_left"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Size="ButtonSize.Small"
+                                      Disabled="@(SelectedIndex <= 0)"
+                                      Click="@SelectPrevious" />
+                        <span>@(SelectedIndex + 1) of @FilteredCandidates.Count @StatusFilter.ToLowerInvariant()</span>
+                        <RadzenButton Icon="chevron_right"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Size="ButtonSize.Small"
+                                      Disabled="@(SelectedIndex >= FilteredCandidates.Count - 1)"
+                                      Click="@SelectNext" />
+                    </div>
+                </div>
+
+                <div class="cmr-compare-scroll">
+                    <table class="cmr-compare-table">
+                        <thead>
+                            <tr>
+                                <th>Field @HelpIcon("Metadata field being compared.")</th>
+                                <th>Parsed Current @HelpIcon("Metadata currently parsed from SQL.")</th>
+                                <th>Saved Existing @HelpIcon("Metadata currently saved in Schema Studio.")</th>
+                                <th>Choice @HelpIcon("Changed rows default to keeping saved metadata. Added and removed rows have fixed outcomes.")</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var field in SelectedCandidate.Fields)
+                            {
+                                <tr>
+                                    <td class="cmr-field-name">@field.Label @HelpIcon(field.HelpText)</td>
+                                    <td>@FieldValue(field.ParsedValue, field.IsMultiline)</td>
+                                    <td>@FieldValue(field.SavedValue, field.IsMultiline, field.SavedMissingText)</td>
+                                    <td>@ChoiceCell(SelectedCandidate)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <aside class="cmr-result-card">
+                <div class="cmr-card-header">
+                    <div class="cmr-heading-group">
+                        <h3>Effective Result</h3>
+                        @HelpIcon("Preview of the metadata that will be staged when Apply Merge is pressed.")
+                    </div>
+                </div>
+
+                <div class="cmr-result-fields">
+                    <label>
+                        <span>Business Name</span>
+                        <RadzenTextBox Value="@SelectedCandidate.EffectiveBusinessName" ReadOnly="true" Style="width: 100%;" />
+                    </label>
+
+                    <label>
+                        <span>Business Description</span>
+                        <RadzenTextArea Value="@SelectedCandidate.EffectiveBusinessDescription"
+                                        ReadOnly="true"
+                                        class="cmr-textarea"
+                                        Style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;" />
+                    </label>
+
+                    <label>
+                        <span>Disable Inheritance</span>
+                        <RadzenTextBox Value="@FormatBool(SelectedCandidate.EffectiveDisableInheritance)" ReadOnly="true" Style="width: 100%;" />
+                    </label>
+                </div>
+
+                <div class="cmr-choice-panel">
+                    <div class="cmr-choice-title">
+                        <span>Merge Choice</span>
+                        @HelpIcon("Only changed and conflict rows need a choice. Added and removed rows are predetermined.")
+                    </div>
+
+                    @if (SelectedCandidate.IsChoiceEditable)
+                    {
+                        <div class="cmr-choice-buttons">
+                            <label class="@GetChoiceClass(SelectedCandidate, MergeChoice.KeepSaved)">
+                                <input type="radio"
+                                       name="merge-choice"
+                                       checked="@(SelectedCandidate.Choice == MergeChoice.KeepSaved)"
+                                       @onchange="@(() => SelectedCandidate.Choice = MergeChoice.KeepSaved)" />
+                                <span>Keep Saved</span>
+                            </label>
+                            <label class="@GetChoiceClass(SelectedCandidate, MergeChoice.UseParsed)">
+                                <input type="radio"
+                                       name="merge-choice"
+                                       checked="@(SelectedCandidate.Choice == MergeChoice.UseParsed)"
+                                       @onchange="@(() => SelectedCandidate.Choice = MergeChoice.UseParsed)" />
+                                <span>Use Parsed</span>
+                            </label>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="cmr-fixed-choice">@SelectedCandidate.FixedChoiceText</div>
+                    }
+                </div>
+            </aside>
+        </main>
+    }
+
+    <footer class="cmr-footer">
+        <span>Showing @FilteredCandidates.Count of @Candidates.Count columns</span>
+        <div class="cmr-actions">
+            <RadzenButton Text="Cancel"
+                          ButtonStyle="ButtonStyle.Light"
+                          Click="@Cancel" />
+            <RadzenButton Text="Apply Merge"
+                          Icon="published_with_changes"
+                          Disabled="@(Candidates.Count == 0)"
+                          Click="@ApplyMerge" />
+        </div>
+    </footer>
+</div>
+
+@code {
+    private const string AllStatus = "All";
+    private const string AddedStatus = "Added";
+    private const string ChangedStatus = "Changed";
+    private const string RemovedStatus = "Removed";
+    private const string ConflictStatus = "Conflicts";
+    private const string UnchangedStatus = "Unchanged";
+    private const string HasMetadataStatus = "Has Metadata";
+
+    [Parameter]
+    public string ViewDisplayName { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsBaseView { get; set; }
+
+    [Parameter]
+    public int SchemaObjectId { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<ViewSourcedColumnDefinition> ParsedColumns { get; set; } = Array.Empty<ViewSourcedColumnDefinition>();
+
+    [Parameter]
+    public IList<SchemaObjectColumnDefinition> SavedColumns { get; set; } = Array.Empty<SchemaObjectColumnDefinition>();
+
+    private string SearchText { get; set; } = string.Empty;
+    private string StatusFilter { get; set; } = ChangedStatus;
+    private string? SelectedColumnName { get; set; }
+    private List<MergeCandidate> Candidates { get; set; } = new();
+
+    private IReadOnlyList<string> StatusOptions { get; } =
+    [
+        AllStatus,
+        ChangedStatus,
+        AddedStatus,
+        RemovedStatus,
+        ConflictStatus,
+        UnchangedStatus,
+        HasMetadataStatus
+    ];
+
+    private List<MergeCandidate> FilteredCandidates =>
+        Candidates
+            .Where(MatchesStatusFilter)
+            .Where(MatchesSearch)
+            .ToList();
+
+    private MergeCandidate? SelectedCandidate =>
+        FilteredCandidates.FirstOrDefault(candidate => string.Equals(candidate.ColumnName, SelectedColumnName, StringComparison.OrdinalIgnoreCase))
+        ?? FilteredCandidates.FirstOrDefault();
+
+    private int SelectedIndex =>
+        SelectedCandidate == null
+            ? -1
+            : FilteredCandidates.FindIndex(candidate => string.Equals(candidate.ColumnName, SelectedCandidate.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+    private IEnumerable<CountChip> CountChips =>
+    [
+        new CountChip(ChangedStatus, "Changed", Candidates.Count(x => x.Status == MergeStatus.Changed)),
+        new CountChip(AddedStatus, "Added", Candidates.Count(x => x.Status == MergeStatus.Added)),
+        new CountChip(RemovedStatus, "Removed", Candidates.Count(x => x.Status == MergeStatus.Removed)),
+        new CountChip(ConflictStatus, "Conflicts", Candidates.Count(x => x.Status == MergeStatus.Conflict)),
+        new CountChip(UnchangedStatus, "Unchanged", Candidates.Count(x => x.Status == MergeStatus.Unchanged)),
+        new CountChip(HasMetadataStatus, "Has Metadata", Candidates.Count(x => x.HasParsedMetadata))
+    ];
+
+    protected override void OnParametersSet()
+    {
+        Candidates = BuildCandidates();
+
+        if (Candidates.Count > 0 && Candidates.All(x => x.Status == MergeStatus.Added))
+        {
+            StatusFilter = AddedStatus;
+        }
+        else if (!Candidates.Any(MatchesStatusFilter))
+        {
+            StatusFilter = AllStatus;
+        }
+
+        SelectFirstFilteredCandidate();
+    }
+
+    private List<MergeCandidate> BuildCandidates()
+    {
+        var parsedByName = ParsedColumns
+            .Where(x => !string.IsNullOrWhiteSpace(x.ColumnName))
+            .GroupBy(x => x.ColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+
+        var savedByName = SavedColumns
+            .Where(x => !string.IsNullOrWhiteSpace(x.SourceColumnName))
+            .GroupBy(x => x.SourceColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+
+        return parsedByName.Keys
+            .Union(savedByName.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => parsedByName.TryGetValue(name, out var parsed) ? parsed.OrdinalPosition : int.MaxValue)
+            .ThenBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(name =>
+            {
+                parsedByName.TryGetValue(name, out var parsed);
+                savedByName.TryGetValue(name, out var saved);
+                return new MergeCandidate(name, parsed, saved);
+            })
+            .ToList();
+    }
+
+    private bool MatchesStatusFilter(MergeCandidate candidate) =>
+        StatusFilter switch
+        {
+            AddedStatus => candidate.Status == MergeStatus.Added,
+            ChangedStatus => candidate.Status == MergeStatus.Changed,
+            RemovedStatus => candidate.Status == MergeStatus.Removed,
+            ConflictStatus => candidate.Status == MergeStatus.Conflict,
+            UnchangedStatus => candidate.Status == MergeStatus.Unchanged,
+            HasMetadataStatus => candidate.HasParsedMetadata,
+            _ => true
+        };
+
+    private bool MatchesSearch(MergeCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText))
+        {
+            return true;
+        }
+
+        var search = SearchText.Trim();
+        return Contains(candidate.ColumnName, search)
+            || Contains(candidate.Parsed?.BusinessName, search)
+            || Contains(candidate.Parsed?.BusinessDescription, search)
+            || Contains(candidate.Saved?.BusinessName, search)
+            || Contains(candidate.Saved?.BusinessDescription, search);
+    }
+
+    private void SetStatusFilter(string status)
+    {
+        StatusFilter = status;
+        SelectFirstFilteredCandidate();
+    }
+
+    private void SelectFirstFilteredCandidate()
+    {
+        SelectedColumnName = FilteredCandidates.FirstOrDefault()?.ColumnName;
+    }
+
+    private void SelectPrevious()
+    {
+        if (SelectedIndex > 0)
+        {
+            SelectedColumnName = FilteredCandidates[SelectedIndex - 1].ColumnName;
+        }
+    }
+
+    private void SelectNext()
+    {
+        if (SelectedIndex >= 0 && SelectedIndex < FilteredCandidates.Count - 1)
+        {
+            SelectedColumnName = FilteredCandidates[SelectedIndex + 1].ColumnName;
+        }
+    }
+
+    private void ApplyMerge()
+    {
+        foreach (var candidate in Candidates)
+        {
+            if (candidate.Parsed == null)
+            {
+                continue;
+            }
+
+            if (candidate.Saved == null)
+            {
+                SavedColumns.Add(CreateColumn(candidate.Parsed));
+                continue;
+            }
+
+            if (candidate.Choice == MergeChoice.UseParsed)
+            {
+                ApplyParserStructure(candidate.Saved, candidate.Parsed);
+                candidate.Saved.IsDirty = true;
+                candidate.Saved.BusinessName = NormalizeNullableText(candidate.Parsed.BusinessName);
+                candidate.Saved.BusinessDescription = NormalizeNullableText(candidate.Parsed.BusinessDescription);
+                candidate.Saved.DisableInheritance = candidate.Parsed.DisableInheritance;
+            }
+        }
+
+        DialogService.Close(true);
+    }
+
+    private SchemaObjectColumnDefinition CreateColumn(ViewSourcedColumnDefinition parsed)
+    {
+        var column = new SchemaObjectColumnDefinition
+        {
+            SchemaObjectColumnId = 0,
+            SchemaObjectId = SchemaObjectId,
+            DeveloperNotes = null
+        };
+
+        ApplyParserStructure(column, parsed);
+        column.BusinessName = NormalizeNullableText(parsed.BusinessName);
+        column.BusinessDescription = NormalizeNullableText(parsed.BusinessDescription);
+        column.DisableInheritance = parsed.DisableInheritance;
+        return column;
+    }
+
+    private static void ApplyParserStructure(SchemaObjectColumnDefinition saved, ViewSourcedColumnDefinition parsed)
+    {
+        saved.OrdinalPosition = parsed.OrdinalPosition;
+        saved.SourceColumnName = parsed.ColumnName ?? string.Empty;
+        saved.SourceColumnKind = NormalizeNullableText(parsed.ColumnKind.ToString());
+        saved.BaseDatabaseName = NormalizeNullableText(parsed.BaseDatabase);
+        saved.BaseSchemaName = NormalizeNullableText(parsed.BaseSchema);
+        saved.BaseObjectName = NormalizeNullableText(parsed.BaseTable);
+        saved.BaseColumnName = NormalizeNullableText(parsed.BaseColumn);
+        saved.SemanticDatabase = NormalizeNullableText(parsed.SemanticDatabase);
+        saved.SemanticSchema = NormalizeNullableText(parsed.SemanticSchema);
+        saved.SemanticObject = NormalizeNullableText(parsed.SemanticObject);
+        saved.SemanticColumn = NormalizeNullableText(parsed.SemanticColumn);
+        saved.IsBaseDefinition = false;
+    }
+
+    private void Cancel()
+    {
+        DialogService.Close(null);
+    }
+
+    private RenderFragment HelpIcon(string helpText) => builder =>
+    {
+        builder.OpenComponent<RadzenIcon>(0);
+        builder.AddAttribute(1, "Icon", "help_outline");
+        builder.AddAttribute(2, "title", helpText);
+        builder.AddAttribute(3, "class", "cmr-help-icon");
+        builder.CloseComponent();
+    };
+
+    private RenderFragment FieldValue(string? value, bool multiline, string missingText = "Blank") => builder =>
+    {
+        var displayValue = string.IsNullOrWhiteSpace(value) ? missingText : value;
+        if (multiline)
+        {
+            builder.OpenComponent<RadzenTextArea>(0);
+            builder.AddAttribute(1, "Value", displayValue);
+            builder.AddAttribute(2, "ReadOnly", true);
+            builder.AddAttribute(3, "class", "cmr-textarea");
+            builder.AddAttribute(4, "Style", "width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;");
+            builder.CloseComponent();
+        }
+        else
+        {
+            builder.OpenComponent<RadzenTextBox>(5);
+            builder.AddAttribute(6, "Value", displayValue);
+            builder.AddAttribute(7, "ReadOnly", true);
+            builder.AddAttribute(8, "Style", "width:100%;");
+            builder.CloseComponent();
+        }
+    };
+
+    private RenderFragment ChoiceCell(MergeCandidate candidate) => builder =>
+    {
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "cmr-choice-cell");
+        builder.AddContent(2, candidate.IsChoiceEditable ? candidate.ChoiceLabel : candidate.FixedChoiceText);
+        builder.CloseElement();
+    };
+
+    private string GetCountChipClass(string status) =>
+        string.Equals(StatusFilter, status, StringComparison.Ordinal)
+            ? $"cmr-count-chip selected {GetStatusToken(status)}"
+            : $"cmr-count-chip {GetStatusToken(status)}";
+
+    private static string GetStatusBadgeClass(MergeStatus status) =>
+        $"cmr-status-badge {status.ToString().ToLowerInvariant()}";
+
+    private static string GetChoiceClass(MergeCandidate candidate, MergeChoice choice) =>
+        candidate.Choice == choice
+            ? "cmr-choice-card selected"
+            : "cmr-choice-card";
+
+    private static string GetStatusToken(string status) =>
+        status.ToLowerInvariant().Replace(" ", "-");
+
+    private static bool Contains(string? value, string search) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains(search, StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeNullableText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatBool(bool value) => value ? "Yes" : "No";
+
+    private enum MergeStatus
+    {
+        Added,
+        Removed,
+        Changed,
+        Conflict,
+        Unchanged
+    }
+
+    private enum MergeChoice
+    {
+        KeepSaved,
+        UseParsed
+    }
+
+    private sealed record CountChip(string Status, string Label, int Count);
+
+    private sealed class MergeCandidate
+    {
+        public MergeCandidate(string columnName, ViewSourcedColumnDefinition? parsed, SchemaObjectColumnDefinition? saved)
+        {
+            ColumnName = columnName;
+            Parsed = parsed;
+            Saved = saved;
+            Status = DetermineStatus(parsed, saved);
+            Choice = Status == MergeStatus.Added
+                ? MergeChoice.UseParsed
+                : MergeChoice.KeepSaved;
+        }
+
+        public string ColumnName { get; }
+        public ViewSourcedColumnDefinition? Parsed { get; }
+        public SchemaObjectColumnDefinition? Saved { get; }
+        public MergeStatus Status { get; }
+        public MergeChoice Choice { get; set; }
+        public bool IsChoiceEditable => Status is MergeStatus.Changed or MergeStatus.Conflict && Saved != null && Parsed != null;
+        public bool HasParsedMetadata => Parsed != null
+            && (!string.IsNullOrWhiteSpace(Parsed.BusinessName)
+                || !string.IsNullOrWhiteSpace(Parsed.BusinessDescription)
+                || Parsed.DisableInheritance);
+
+        public string StatusLabel => Status == MergeStatus.Conflict ? "Conflicts" : Status.ToString();
+        public string ChoiceLabel => Choice == MergeChoice.UseParsed ? "Use Parsed" : "Keep Saved";
+        public string FixedChoiceText => Status switch
+        {
+            MergeStatus.Added => "Use Parsed",
+            MergeStatus.Removed => "Informational",
+            MergeStatus.Unchanged => "No Change",
+            _ => ChoiceLabel
+        };
+
+        public string? EffectiveBusinessName => Choice == MergeChoice.UseParsed
+            ? Parsed?.BusinessName
+            : Saved?.BusinessName;
+
+        public string? EffectiveBusinessDescription => Choice == MergeChoice.UseParsed
+            ? Parsed?.BusinessDescription
+            : Saved?.BusinessDescription;
+
+        public bool EffectiveDisableInheritance => Choice == MergeChoice.UseParsed
+            ? Parsed?.DisableInheritance ?? false
+            : Saved?.DisableInheritance ?? false;
+
+        public IReadOnlyList<MergeField> Fields =>
+        [
+            new MergeField(
+                "Business Name",
+                Parsed?.BusinessName,
+                Saved?.BusinessName,
+                false,
+                Saved == null ? "Not saved yet" : "Blank",
+                "User-facing business label."),
+            new MergeField(
+                "Business Description",
+                Parsed?.BusinessDescription,
+                Saved?.BusinessDescription,
+                true,
+                Saved == null ? "Not saved yet" : "Blank",
+                "Business-facing description."),
+            new MergeField(
+                "Disable Inheritance",
+                Parsed == null ? null : FormatBool(Parsed.DisableInheritance),
+                Saved == null ? null : FormatBool(Saved.DisableInheritance),
+                false,
+                Saved == null ? "Not saved yet" : "No",
+                "Prevents inherited metadata from overriding local meaning.")
+        ];
+
+        private static MergeStatus DetermineStatus(ViewSourcedColumnDefinition? parsed, SchemaObjectColumnDefinition? saved)
+        {
+            if (parsed != null && saved == null)
+            {
+                return MergeStatus.Added;
+            }
+
+            if (parsed == null && saved != null)
+            {
+                return MergeStatus.Removed;
+            }
+
+            if (parsed == null || saved == null)
+            {
+                return MergeStatus.Unchanged;
+            }
+
+            var nameChanged = !string.Equals(NormalizeNullableText(parsed.BusinessName), NormalizeNullableText(saved.BusinessName), StringComparison.Ordinal);
+            var descriptionChanged = !string.Equals(NormalizeNullableText(parsed.BusinessDescription), NormalizeNullableText(saved.BusinessDescription), StringComparison.Ordinal);
+            var inheritanceChanged = parsed.DisableInheritance != saved.DisableInheritance;
+
+            if (!nameChanged && !descriptionChanged && !inheritanceChanged)
+            {
+                return MergeStatus.Unchanged;
+            }
+
+            var savedHasMetadata = !string.IsNullOrWhiteSpace(saved.BusinessName)
+                || !string.IsNullOrWhiteSpace(saved.BusinessDescription)
+                || saved.DisableInheritance;
+            var parsedHasMetadata = !string.IsNullOrWhiteSpace(parsed.BusinessName)
+                || !string.IsNullOrWhiteSpace(parsed.BusinessDescription)
+                || parsed.DisableInheritance;
+
+            return savedHasMetadata && parsedHasMetadata
+                ? MergeStatus.Conflict
+                : MergeStatus.Changed;
+        }
+    }
+
+    private sealed record MergeField(
+        string Label,
+        string? ParsedValue,
+        string? SavedValue,
+        bool IsMultiline,
+        string SavedMissingText,
+        string HelpText);
+}

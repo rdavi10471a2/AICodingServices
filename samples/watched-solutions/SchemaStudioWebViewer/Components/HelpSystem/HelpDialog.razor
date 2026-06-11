@@ -1,0 +1,290 @@
+﻿@using Radzen
+@using Radzen.Blazor
+@using SchemaStudioWebViewer.Models
+@using System.Text.Json
+
+@inject DialogService DialogService
+@inject IWebHostEnvironment Env
+
+<div style="
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;">
+
+    @* Main Body *@
+    <div style="
+        flex: 1;
+        display: flex;
+        overflow: hidden;">
+
+        @* Sidebar Navigation *@
+        <div style="
+            width: 280px;
+            border-right: 1px solid var(--rz-divider);
+            background-color: var(--rz-base-100);
+            overflow-y: auto;">
+
+            <RadzenListBox @bind-Value="@SelectedSubject"
+                           Data="@HelpSubjects"
+                           TValue="HelpSubject"
+                           Style="width: 100%; height: 100%; border: none; background: transparent;">
+
+                <Template Context="subject">
+                    @{
+                        var item = subject as HelpSubject;
+                    }
+
+                    <RadzenStack Orientation="Orientation.Horizontal"
+                                 AlignItems="AlignItems.Center"
+                                 Gap="0.5rem"
+                                 class="rz-p-3">
+
+                        <RadzenIcon Icon="@(item?.Icon ?? "help")"
+                                    Style="font-size: 1.25rem;" />
+
+                        <RadzenStack Gap="0">
+
+                            <RadzenText TextStyle="TextStyle.Body2"
+                                        class="rz-m-0"
+                                        Style="font-weight: 700;">
+                                @item?.Title
+                            </RadzenText>
+
+                            <RadzenText TextStyle="TextStyle.Caption"
+                                        class="rz-m-0"
+                                        Style="font-size: 0.75rem;">
+                                @item?.Subtitle
+                            </RadzenText>
+
+                        </RadzenStack>
+
+                    </RadzenStack>
+                </Template>
+
+            </RadzenListBox>
+
+        </div>
+
+        @* Content Area *@
+        <div style="
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 1.5rem;">
+
+            @if (SelectedSubject == null)
+            {
+                <RadzenStack AlignItems="AlignItems.Center"
+                             JustifyContent="JustifyContent.Center"
+                             Style="height: 100%;">
+
+                    <RadzenIcon Icon="help_outline"
+                                Style="font-size: 4rem; color: var(--rz-base-300);" />
+
+                    <RadzenText TextStyle="TextStyle.H6"
+                                Style="color: var(--rz-base-400);">
+                        Select a topic to view details
+                    </RadzenText>
+
+                </RadzenStack>
+            }
+            else
+            {
+                <div class="rz-mb-4">
+
+                    <RadzenText TextStyle="TextStyle.H3" class="rz-m-0">
+                        @SelectedSubject.Title
+                    </RadzenText>
+
+                    <RadzenText TextStyle="TextStyle.Subtitle1"
+                                Style="color: var(--rz-base-500);">
+                        @SelectedSubject.Subtitle
+                    </RadzenText>
+
+                </div>
+
+                <RadzenStack Gap="1.5rem">
+
+                    @foreach (var detailSection in GetDetailSections())
+                    {
+                        <div>
+                            @if (!string.IsNullOrWhiteSpace(detailSection.Title))
+                            {
+                                <RadzenText TextStyle="TextStyle.H6"
+                                            class="rz-mb-2"
+                                            Style="font-weight:800;color:var(--rz-primary);">
+                                    @detailSection.Title
+                                </RadzenText>
+                            }
+
+                            <RadzenStack Gap="1rem">
+                                @foreach (var detail in detailSection.Details)
+                                {
+                                    <RadzenCard Variant="Variant.Outlined"
+                                                Style="border-left: 4px solid var(--rz-primary);">
+
+                                        <RadzenStack Orientation="Orientation.Horizontal"
+                                                     AlignItems="AlignItems.Center"
+                                                     class="rz-mb-2">
+
+                                            <RadzenIcon Icon="@detail.Icon"
+                                                        Style="color: var(--rz-primary); font-size: 1.5rem;" />
+
+                                            <RadzenText TextStyle="TextStyle.H6"
+                                                        class="rz-m-0"
+                                                        Style="font-weight: 800;">
+                                                @detail.Label
+                                            </RadzenText>
+
+                                        </RadzenStack>
+
+                                        <RadzenText TextStyle="TextStyle.Subtitle2"
+                                                    Style="
+                                                                color: var(--rz-secondary);
+                                                                font-weight: 700;
+                                                                text-transform: uppercase;
+                                                                font-size: 0.75rem;">
+                                            @detail.Subtitle
+                                        </RadzenText>
+
+                                        <RadzenText TextStyle="TextStyle.Body1"
+                                                    class="rz-my-2"
+                                                    Style="white-space: pre-wrap; line-height: 1.5;">
+                                            @detail.Description
+                                        </RadzenText>
+
+                                        @if (!string.IsNullOrEmpty(detail.CustomFragmentName))
+                                        {
+                                            <div class="rz-mt-4">
+                                                @GetSpecializedContent(detail.CustomFragmentName)
+                                            </div>
+                                        }
+
+                                    </RadzenCard>
+                                }
+                            </RadzenStack>
+                        </div>
+                    }
+
+                </RadzenStack>
+            }
+
+        </div>
+
+    </div>
+
+    @* Footer *@
+    <div style="
+        padding: 1rem 1.5rem;
+        border-top: 1px solid var(--rz-divider);
+        background: white;
+        display: flex;
+        justify-content: flex-end;">
+
+        <RadzenButton Text="Close"
+                      Icon="close"
+                      ButtonStyle="ButtonStyle.Secondary"
+                      Click="@CloseDialog" />
+
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public List<DatabaseModel> Databases { get; set; } = new();
+    [Parameter] public string InitialSubjectId { get; set; } = string.Empty;
+
+    private List<HelpSubject> HelpSubjects = new();
+    private HelpSubject? SelectedSubject;
+
+    protected override void OnInitialized()
+    {
+        string path = Path.Combine(Env.WebRootPath, "data", "help.json");
+
+        if (File.Exists(path))
+        {
+            try
+            {
+                var json = File.ReadAllText(path);
+
+                HelpSubjects = JsonSerializer.Deserialize<List<HelpSubject>>(json) ?? new();
+
+                if (!string.IsNullOrWhiteSpace(InitialSubjectId))
+                {
+                    SelectedSubject = HelpSubjects.FirstOrDefault(
+                        s => s.Id.Equals(
+                            InitialSubjectId,
+                            StringComparison.OrdinalIgnoreCase));
+                }
+
+                SelectedSubject ??= HelpSubjects.FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading help data: {ex.Message}");
+            }
+        }
+    }
+
+    private void CloseDialog()
+    {
+        DialogService.Close();
+    }
+
+    private IEnumerable<HelpDetailSection> GetDetailSections()
+    {
+        if (SelectedSubject == null)
+        {
+            return Enumerable.Empty<HelpDetailSection>();
+        }
+
+        var showSectionHeaders = SelectedSubject.Details.Any(detail => !string.IsNullOrWhiteSpace(detail.Section));
+
+        return SelectedSubject.Details
+            .GroupBy(detail => showSectionHeaders ? (detail.Section ?? string.Empty).Trim() : string.Empty)
+            .Select(group => new HelpDetailSection(group.Key, group.ToList()));
+    }
+
+    private RenderFragment GetSpecializedContent(string fragmentName) => builder =>
+    {
+        if (fragmentName == "DatabaseGrid")
+        {
+            builder.OpenComponent<RadzenDataGrid<DatabaseModel>>(0);
+            builder.AddAttribute(1, "Data", Databases);
+            builder.AddAttribute(2, "Density", Density.Compact);
+            builder.AddAttribute(3, "AllowPaging", true);
+            builder.AddAttribute(4, "PageSize", 5);
+            builder.AddAttribute(5, "Style", "width: 100%;");
+
+            builder.AddAttribute(6, "Columns", (RenderFragment)((builder2) =>
+            {
+                builder2.OpenComponent<RadzenDataGridColumn<DatabaseModel>>(7);
+                builder2.AddAttribute(8, "Property", "DatabaseId");
+                builder2.AddAttribute(9, "Title", "ID");
+                builder2.AddAttribute(10, "Width", "70px");
+                builder2.CloseComponent();
+
+                builder2.OpenComponent<RadzenDataGridColumn<DatabaseModel>>(11);
+                builder2.AddAttribute(12, "Property", "DatabaseName");
+                builder2.AddAttribute(13, "Title", "Physical Name");
+                builder2.CloseComponent();
+
+                builder2.OpenComponent<RadzenDataGridColumn<DatabaseModel>>(14);
+                builder2.AddAttribute(15, "Property", "BusinessName");
+                builder2.AddAttribute(16, "Title", "Business Name");
+                builder2.CloseComponent();
+
+                builder2.OpenComponent<RadzenDataGridColumn<DatabaseModel>>(17);
+                builder2.AddAttribute(18, "Property", "BusinessDescription");
+                builder2.AddAttribute(19, "Title", "Business Description");
+                builder2.CloseComponent();
+            }));
+
+            builder.CloseComponent();
+        }
+    };
+
+    private sealed record HelpDetailSection(string Title, List<HelpDetail> Details);
+}

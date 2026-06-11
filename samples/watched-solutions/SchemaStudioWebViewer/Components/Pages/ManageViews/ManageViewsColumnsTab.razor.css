@@ -1,0 +1,289 @@
+/* 2026-04-30 07:09 PM CDT AI marker: keep the saved-column Disable Inheritance checkbox dark and visible like the related Manage Views Next editor. */
+/* 2026-04-30 12:36 PM CDT AI marker: style the saved-column selector/editor surface that replaced the old maintenance grid. */
+.manage-views-columns-shell {
+    min-height: 0;
+}
+
+.manage-views-columns-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.manage-views-columns-title {
+    color: var(--rz-primary);
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.manage-views-columns-subtitle {
+    margin-top: 0.15rem;
+    color: #6b7280;
+    font-size: 0.85rem;
+}
+
+.manage-views-column-editor {
+    display: grid;
+    grid-template-columns: minmax(300px, 0.75fr) minmax(520px, 1.25fr);
+    gap: 0.75rem;
+    min-height: 420px;
+    height: calc(100vh - 430px);
+}
+
+.manage-views-column-selector,
+.manage-views-column-detail {
+    min-height: 0;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.manage-views-column-selector {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.manage-views-column-detail {
+    display: flex;
+    flex-direction: column;
+}
+
+.manage-views-column-panel-header {
+    min-height: 40px;
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid #e7ebf0;
+    background: #f8f9fb;
+    color: #1f2937;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.manage-views-column-filter {
+    padding: 0.65rem;
+    border-bottom: 1px solid #eef0f3;
+}
+
+.manage-views-column-list {
+    min-height: 0;
+    overflow: auto;
+    padding: 0.4rem;
+}
+
+.manage-views-column-selector-item {
+    width: 100%;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #1f2937;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 0.55rem;
+    align-items: start;
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.manage-views-column-selector-item:hover,
+.manage-views-column-selector-item.selected {
+    background: #eef3ff;
+}
+
+.manage-views-column-selector-item.selected {
+    box-shadow: inset 3px 0 0 var(--rz-primary);
+}
+
+.manage-views-column-sequence {
+    color: #4b5563;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.manage-views-column-selector-text {
+    min-width: 0;
+    display: grid;
+    gap: 0.15rem;
+}
+
+.manage-views-column-selector-text strong,
+.manage-views-column-selector-text span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.manage-views-column-selector-text strong {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.manage-views-column-selector-text span {
+    color: #6b7280;
+    font-size: 0.78rem;
+}
+
+.manage-views-column-dirty {
+    border: 1px solid #f6d58f;
+    border-radius: 3px;
+    background: #fff8e6;
+    color: #8a5a00;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.05rem 0.35rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.manage-views-column-detail-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 1rem;
+}
+
+.manage-views-column-empty {
+    padding: 1rem;
+    color: #6b7280;
+}
+
+.manage-views-column-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid #e7ebf0;
+}
+
+.manage-views-column-heading h3 {
+    margin: 0;
+    color: #111827;
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+
+.manage-views-column-heading p {
+    margin: 0.15rem 0 0;
+    color: #6b7280;
+    font-size: 0.85rem;
+}
+
+.manage-views-column-heading-ordinal {
+    min-width: 38px;
+    min-height: 38px;
+    border-radius: 6px;
+    background: #eef3ff;
+    color: var(--rz-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+}
+
+.manage-views-column-readonly-grid,
+.manage-views-column-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+    padding-top: 1rem;
+}
+
+.manage-views-column-readonly-item,
+.manage-views-column-field {
+    min-width: 0;
+}
+
+.manage-views-column-readonly-item {
+    border-bottom: 1px solid #eef0f3;
+    padding-bottom: 0.65rem;
+}
+
+.manage-views-column-readonly-item strong {
+    display: block;
+    min-height: 30px;
+    overflow-wrap: anywhere;
+    color: #1f2937;
+    font-size: 0.88rem;
+    font-weight: 500;
+}
+
+.manage-views-column-field-wide {
+    grid-column: 1 / -1;
+}
+
+.manage-views-column-label {
+    min-height: 24px;
+    margin-bottom: 0.3rem;
+    color: var(--rz-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: normal;
+    text-transform: uppercase;
+}
+
+::deep .manage-views-column-label .rzi,
+::deep .manage-views-column-label .rz-icon,
+::deep .manage-views-column-help {
+    color: var(--rz-primary) !important;
+    cursor: help;
+    font-size: 1rem;
+}
+
+::deep .manage-views-column-textarea {
+    min-height: 118px;
+}
+
+::deep .manage-views-column-notes {
+    min-height: 150px;
+}
+
+::deep .manage-views-column-edit-grid .rz-chkbox,
+::deep .manage-views-column-edit-grid .rz-chkbox-box {
+    width: 20px;
+    height: 20px;
+}
+
+::deep .manage-views-column-edit-grid .rz-chkbox-box {
+    border: 2px solid #1f2937 !important;
+    border-radius: 4px;
+    background: #fff !important;
+    box-shadow: 0 0 0 2px #eef3ff;
+}
+
+::deep .manage-views-column-edit-grid .rz-chkbox-box.rz-state-active,
+::deep .manage-views-column-edit-grid .rz-chkbox-box.rz-state-highlight,
+::deep .manage-views-column-edit-grid .rz-chkbox-box.rz-state-checked {
+    border-color: #1f2937 !important;
+    background: var(--rz-primary) !important;
+}
+
+@media (max-width: 1100px) {
+    .manage-views-column-editor {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+
+    .manage-views-column-selector,
+    .manage-views-column-detail {
+        min-height: 320px;
+    }
+
+    .manage-views-column-readonly-grid,
+    .manage-views-column-edit-grid {
+        grid-template-columns: 1fr;
+    }
+}

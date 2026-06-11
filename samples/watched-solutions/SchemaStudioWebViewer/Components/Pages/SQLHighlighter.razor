@@ -1,0 +1,13 @@
+﻿@inject IJSRuntime JSRuntime
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // The component is now in the DOM inside the dialog
+            await Task.Delay(200); // Small buffer for the fade-in
+            await JSRuntime.InvokeVoidAsync("highlightSql");
+        }
+    }
+}

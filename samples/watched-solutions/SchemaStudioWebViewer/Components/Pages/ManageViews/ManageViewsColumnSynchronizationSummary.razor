@@ -1,0 +1,62 @@
+@using SchemaStudio.AIHelpers
+@using Radzen
+
+@attribute [FileVersion("1.2")]
+@attribute [AIFileContext("Components/Pages/ManageViews/ManageViewsColumnSynchronizationSummary.razor", "Reusable summary card for the manage-views synchronization workflow. Hosts the merge review launch button and explanatory text while the actual merge dialog lives elsewhere.")]
+@attribute [AIChange("1.2", "2026-04-24 11:06 AM CDT moved the synchronization summary component into the shared ManageViews feature folder so the page, summary, columns tab, and isolated styles travel together.", AICommandStatus.Pending)]
+@attribute [AIChange("1.1", "2026-04-24 10:35 AM CDT moved the summary-card styles into isolated css and added the standard fragment-reference header note for this leaf Razor component.", AICommandStatus.Pending)]
+@attribute [AIChange("1.0", "2026-04-24 09:20 AM CDT extracted the column synchronization summary from ManageViews so the summary card can be reused later when the dedicated merge dialog is wired in.", AICommandStatus.Pending)]
+
+@* 2026-04-24 11:06 AM CDT AI v1.2 manage-views-column-sync marker: this summary fragment now lives in the shared ManageViews feature folder beside the page and columns tab. *@
+@* 2026-04-24 10:35 AM CDT AI v1.1 manage-views-column-sync marker: this leaf summary component now keeps its styling in isolated css and documents its fragment-reference status in the header. *@
+@* 2026-04-24 09:20 AM CDT AI v1.0 manage-views-column-sync marker: reusable summary card extracted from ManageViews for later merge-dialog reuse. *@
+@* Fragment References:
+   - None. Leaf component styled by Components/Pages/ManageViews/ManageViewsColumnSynchronizationSummary.razor.css.
+*@
+
+<div class="manage-views-sync-summary @Class">
+    <div class="manage-views-sync-summary-grid">
+        <div>
+            <div class="manage-views-sync-summary-title">@SummaryTitle</div>
+            <RadzenText TextStyle="TextStyle.Body2" class="rz-mt-2">@SummarySentence</RadzenText>
+            <RadzenButton Text="@ReviewButtonText"
+                          Icon="published_with_changes"
+                          Click="@ReviewButtonClick"
+                          class="rz-mt-3"
+                          Disabled="@ReviewButtonDisabled" />
+        </div>
+
+        @if (DescriptionLines?.Any() == true)
+        {
+            <div class="manage-views-sync-summary-text">
+                @foreach (var line in DescriptionLines)
+                {
+                    <div>@line</div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string SummaryTitle { get; set; } = "Column Synchronization Summary";
+
+    [Parameter]
+    public string SummarySentence { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ReviewButtonText { get; set; } = "Review Merge";
+
+    [Parameter]
+    public bool ReviewButtonDisabled { get; set; }
+
+    [Parameter]
+    public IEnumerable<string>? DescriptionLines { get; set; }
+
+    [Parameter]
+    public EventCallback ReviewButtonClick { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

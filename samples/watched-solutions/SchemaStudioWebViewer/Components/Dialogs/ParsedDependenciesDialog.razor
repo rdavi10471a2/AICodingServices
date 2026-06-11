@@ -1,0 +1,185 @@
+@using SchemaStudioWebViewer.WEBSemanticModel.Model
+
+<RadzenStack Gap="0.75rem" Style="height:100%; min-height:520px; padding:10px;">
+    <div class="dependency-tree-shell">
+        @if (DependencyTreeNodes.Count == 0)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat">
+                No parser dependencies were returned for this view.
+            </RadzenAlert>
+        }
+        else
+        {
+            <ul class="dependency-tree">
+                @foreach (var node in DependencyTreeNodes)
+                {
+                    @RenderDependencyNode(node)
+                }
+            </ul>
+        }
+    </div>
+</RadzenStack>
+
+<style>
+    .dependency-tree-shell {
+        height: 100%;
+        overflow: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 0.65rem 0.75rem;
+        background: #fff;
+    }
+
+    /* AI review marker 2026-04-29 18:21:00: presentation-only cleanup for a compact dependency preview. */
+    .dependency-tree,
+    .dependency-tree ul {
+        list-style: none;
+        margin: 0;
+        padding-left: 1.4rem;
+    }
+
+    .dependency-tree {
+        padding-left: 0;
+    }
+
+    .dependency-tree li {
+        position: relative;
+        margin: 0;
+    }
+
+    .dependency-tree li::before {
+        content: "";
+        position: absolute;
+        left: -0.8rem;
+        top: 0;
+        bottom: 0;
+        border-left: 1px solid #d9dde5;
+    }
+
+    .dependency-tree > li::before {
+        display: none;
+    }
+
+    .dependency-tree li::after {
+        content: "";
+        position: absolute;
+        left: -0.8rem;
+        top: 1.05rem;
+        width: 0.65rem;
+        border-top: 1px solid #d9dde5;
+    }
+
+    .dependency-tree > li::after {
+        display: none;
+    }
+
+    .dependency-node {
+        display: grid;
+        grid-template-columns: 58px minmax(420px, 1fr);
+        align-items: center;
+        gap: 0.65rem;
+        min-height: 32px;
+        padding: 0.3rem 0.25rem;
+        border-bottom: 1px solid #eef0f3;
+    }
+
+    .dependency-node.view {
+        border-bottom-color: #dfe5ff;
+    }
+
+    .dependency-kind {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 20px;
+        border: 1px solid #d7ddff;
+        border-radius: 3px;
+        background: #f5f7ff;
+        color: var(--rz-primary);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+    }
+
+    .dependency-name {
+        min-width: 0;
+        overflow: visible;
+        white-space: nowrap;
+        color: #212529;
+        font-weight: 500;
+    }
+
+</style>
+
+@code {
+    [Parameter] public IReadOnlyList<ParsedDependency> Dependencies { get; set; } = Array.Empty<ParsedDependency>();
+
+    private List<DependencyTreeNode> DependencyTreeNodes => BuildTree(Dependencies);
+
+    private RenderFragment RenderDependencyNode(DependencyTreeNode node) => @<li>
+        <div class="dependency-node @node.KindClass" title="@node.Name">
+            <div class="dependency-kind">@node.Dependency.ObjectKind</div>
+            <div class="dependency-name">@node.Name</div>
+        </div>
+        @if (node.Children.Count > 0)
+        {
+            <ul>
+                @foreach (var child in node.Children)
+                {
+                    @RenderDependencyNode(child)
+                }
+            </ul>
+        }
+    </li>;
+
+    private static List<DependencyTreeNode> BuildTree(IReadOnlyList<ParsedDependency> dependencies)
+    {
+        var roots = new List<DependencyTreeNode>();
+        var latestViewNodeByName = new Dictionary<string, DependencyTreeNode>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dependency in dependencies.OrderBy(dependency => dependency.Sequence))
+        {
+            var node = new DependencyTreeNode(dependency);
+
+            if (!string.IsNullOrWhiteSpace(dependency.ParentName) &&
+                latestViewNodeByName.TryGetValue(dependency.ParentName, out var parent))
+            {
+                parent.Children.Add(node);
+            }
+            else
+            {
+                roots.Add(node);
+            }
+
+            // AI review marker 2026-04-29 18:18:00: keep repeated dependency occurrences; only use views as nesting anchors.
+            if (string.Equals(dependency.ObjectKind, "View", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(dependency.ResolvedName))
+            {
+                latestViewNodeByName[dependency.ResolvedName] = node;
+            }
+        }
+
+        return roots;
+    }
+
+    private sealed class DependencyTreeNode
+    {
+        public DependencyTreeNode(ParsedDependency dependency)
+        {
+            Dependency = dependency;
+        }
+
+        public ParsedDependency Dependency { get; }
+
+        public List<DependencyTreeNode> Children { get; } = new();
+
+        public string Name => Dependency.ResolvedName;
+
+        public string KindClass => string.Equals(Dependency.ObjectKind, "View", StringComparison.OrdinalIgnoreCase)
+            ? "view"
+            : "table";
+
+        // AI review marker 2026-04-29 18:21:00: hide aliases from the normal dependency preview.
+    }
+}

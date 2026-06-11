@@ -1,0 +1,32 @@
+﻿@using Radzen.Blazor
+@using Microsoft.AspNetCore.Components.Routing
+
+<RadzenPanelMenu Style="width: 100%;">
+    @* 2026-04-15 03:10 PM CDT AI parser nav marker: add a dedicated parser sandbox entry instead of keeping parser experiments on Home. *@
+    <RadzenPanelMenuItem Text="Schema Explorer"
+                         Icon="explore"
+                         Path="/"
+                         Match="NavLinkMatch.All" />
+
+    <RadzenPanelMenuItem Text="Parser Test Area"
+                         Icon="account_tree"
+                         Path="/parser-lab" />
+
+    @* Legacy Manage Views navigation is intentionally hidden now that the accepted Manage Views surface owns /manage-views.
+    <RadzenPanelMenuItem Text="Manage Views"
+                         Icon="view_sidebar"
+                         Path="/manage-views-legacy" />
+    *@
+
+    <RadzenPanelMenuItem Text="Manage Views"
+                         Icon="view_week"
+                         Path="/manage-views" />
+
+    <RadzenPanelMenuItem Text="Manage Databases"
+                         Icon="database"
+                         Path="/manage-databases" />
+
+    <RadzenPanelMenuItem Text="Help Editor"
+                         Icon="settings_applications"
+                         Path="/help-editor" />
+</RadzenPanelMenu>

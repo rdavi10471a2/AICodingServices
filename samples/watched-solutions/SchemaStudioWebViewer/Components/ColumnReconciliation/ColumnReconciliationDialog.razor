@@ -1,0 +1,1005 @@
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudio.Data.Models
+@using SchemaStudioWebViewer.Components.HelpSystem
+@using SchemaStudioWebViewer.WEBSemanticModel.Model
+
+@inject DialogService DialogService
+@inject TooltipService TooltipService
+
+@attribute [FileVersion("1.11")]
+@attribute [AIFileContext("Components/ColumnReconciliation/ColumnReconciliationDialog.razor", "Focused Manage Views column reconciliation dialog that combines decision-first column reconciliation with optional View Details-style selector navigation.", Responsibilities = "Owns filtered candidate navigation, source mapping comparison, parser-owned structure refresh staging, business-value choice staging, explicit DisableInheritance result staging, saved-value origin labeling, and selected-column reconciliation detail for Manage Views Next.", Nuances = "Selector navigation is hidden by default so the dialog opens as a decision surface; Show Selector remains available for broader review. Changed and conflict-style differences are intentionally collapsed into Needs Review because inherited meaning, blank local declarations, and parser drift do not have a clean user-facing semantic split. Source mapping is informational and parser-owned; Apply Merge refreshes parser structure for existing parsed columns. BusinessName and BusinessDescription follow the selected business-value choice. DisableInheritance is staged explicitly from the merge result dropdown. Saved business values are labeled as declared, inherited, or local override from IsBaseView, IsBaseDefinition, and DisableInheritance without adding database fields. DeveloperNotes are outside this reconciliation surface.", RelatedFiles = "Components/Pages/ManageViewsNext/ManageViewsNext.razor; Components/Pages/ManageViewsNext/ManageViewsNext.Columns.cs; WEBSemanticModel/Model/ViewSourcedColumnDefinition.cs; wwwroot/Data/help.json", LastReviewed = "2026-05-03")]
+
+<div class="column-reconciliation">
+    <section class="cr-filter-band">
+        <div class="cr-view-name">
+            <strong>@ViewDisplayName</strong>
+            @if (IsBaseView)
+            {
+                <span class="cr-chip neutral">Base</span>
+            }
+        </div>
+
+        <div class="cr-status-select">
+            <span>Status</span>
+            <RadzenDropDown Data="@StatusOptions"
+                            @bind-Value="@StatusFilter"
+                            Change="@(_ => RefreshViewState())"
+                            Style="width: 150px;" />
+        </div>
+
+        <div class="cr-counts" aria-label="Column reconciliation filters">
+            @foreach (var count in CountChips)
+            {
+                <button type="button"
+                        @key="count.Status"
+                        class="@GetCountChipClass(count.Status)"
+                        title="@count.HelpText"
+                        aria-label="@count.HelpText"
+                        @onclick="@(() => SetStatusFilter(count.Status))">
+                    <span>@count.Label</span>
+                    <strong>@count.Count</strong>
+                </button>
+            }
+        </div>
+
+        <RadzenButton Text="@(IsNavigationHidden ? "Show Selector" : "Hide Selector")"
+                      Icon="@(IsNavigationHidden ? "left_panel_open" : "left_panel_close")"
+                      ButtonStyle="ButtonStyle.Light"
+                      Size="ButtonSize.Small"
+                      class="cr-selector-toggle"
+                      Click="@ToggleNavigation" />
+
+        <RadzenIcon Icon="help_outline"
+                    title="Column reconciliation help"
+                    aria-label="Column reconciliation help"
+                    class="cr-help-icon"
+                    MouseEnter='@(args => TooltipService.Open(args, "Open the detailed help page for column reconciliation concepts and workflow."))'
+                    @onclick="@OpenHelpAsync" />
+    </section>
+
+    @if (Candidates.Count == 0)
+    {
+        <div class="cr-empty">No parser columns are available for reconciliation.</div>
+    }
+    else if (SelectedCandidate == null)
+    {
+        <div class="cr-empty">No columns match the current filter.</div>
+    }
+    else
+    {
+        <main class="@(IsNavigationHidden ? "cr-body nav-hidden" : "cr-body")">
+            @if (!IsNavigationHidden)
+            {
+                <aside class="cr-navigation">
+                    <section class="cr-panel cr-column-list-panel">
+                        <div class="cr-panel-header">
+                            <h3>Select Columns (@Candidates.Count)</h3>
+                            @HelpIcon("Filtered by search, status, and count chips.")
+                        </div>
+
+                        <div class="cr-selector-search">
+                            <RadzenTextBox @bind-Value="@SearchText"
+                                           Placeholder="Search columns..."
+                                           class="cr-search"
+                                           Change="@(_ => RefreshViewState())" />
+                        </div>
+
+                        <div class="cr-column-list">
+                            @foreach (var candidate in FilteredCandidates)
+                            {
+                                <button type="button"
+                                        @key="candidate.ColumnName"
+                                        class="@GetColumnButtonClass(candidate)"
+                                        title="@candidate.ColumnName"
+                                        @onclick="@(() => SelectCandidate(candidate))">
+                                    <span class="cr-column-main">
+                                        <strong>@candidate.ColumnName</strong>
+                                        @if (candidate.HasParsedMetadata)
+                                        {
+                                            <span class="cr-metadata-dot" title="Current parse has business metadata"></span>
+                                        }
+                                    </span>
+                                    <span class="@GetStatusBadgeClass(candidate.Status)">@candidate.StatusLabel</span>
+                                </button>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="cr-panel cr-source-list-panel">
+                        <div class="cr-panel-header">
+                            <h3>From / Join Sources</h3>
+                            @HelpIcon("Sources from the current parser result.")
+                        </div>
+
+                        <div class="cr-source-tree">
+                            <div class="cr-source-row selected">
+                                <span class="cr-source-chip view">View</span>
+                                <span>@CurrentViewSourceName</span>
+                            </div>
+                            @foreach (var source in CurrentSources)
+                            {
+                                <div class="cr-source-row" @key="FormatSource(source)">
+                                    <span class="cr-source-chip table">@GetSourceKindLabel(source)</span>
+                                    <span>@FormatSource(source)</span>
+                                </div>
+                            }
+                        </div>
+                    </section>
+                </aside>
+            }
+
+            <section class="cr-detail">
+                <div class="cr-detail-header">
+                    <div>
+                        <span class="cr-kicker">Selected Column</span>
+                        <div class="cr-selected-title">
+                            <h3>@SelectedCandidate.ColumnName</h3>
+                            <span class="@GetStatusBadgeClass(SelectedCandidate.Status)">@SelectedCandidate.StatusLabel</span>
+                            @if (!string.IsNullOrWhiteSpace(SelectedCandidate.SavedOriginLabel))
+                            {
+                                <span class="cr-chip neutral" title="@SelectedCandidate.SavedOriginHelp">@SelectedCandidate.SavedOriginLabel</span>
+                            }
+                            @if (SelectedCandidate.SavedBusinessValuesAreBlank)
+                            {
+                                <span class="cr-chip neutral" title="@SelectedCandidate.ValueStateHelp">Blank</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="cr-navigator">
+                        <RadzenButton Icon="chevron_left"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Size="ButtonSize.Small"
+                                      Disabled="@(SelectedIndex <= 0)"
+                                      Click="@SelectPrevious" />
+                        <span>@(SelectedIndex + 1) of @FilteredCandidates.Count @StatusFilter.ToLowerInvariant()</span>
+                        <RadzenButton Icon="chevron_right"
+                                      ButtonStyle="ButtonStyle.Light"
+                                      Size="ButtonSize.Small"
+                                      Disabled="@(SelectedIndex >= FilteredCandidates.Count - 1)"
+                                      Click="@SelectNext" />
+                    </div>
+                </div>
+
+                <div class="cr-tabs" role="tablist" aria-label="Column reconciliation detail views">
+                    <button type="button"
+                            class="@GetDetailTabClass(BusinessValuesTab)"
+                            role="tab"
+                            aria-selected="@(SelectedDetailTab == BusinessValuesTab)"
+                            @onclick="@(() => SelectedDetailTab = BusinessValuesTab)">
+                        Business Values
+                    </button>
+                    <button type="button"
+                            class="@GetDetailTabClass(SourceMappingTab)"
+                            role="tab"
+                            aria-selected="@(SelectedDetailTab == SourceMappingTab)"
+                            @onclick="@(() => SelectedDetailTab = SourceMappingTab)">
+                        Source Mapping Check
+                    </button>
+                </div>
+
+                <div class="cr-detail-scroll">
+                    @if (SelectedDetailTab == SourceMappingTab)
+                    {
+                        <section class="cr-section">
+                            <div class="cr-section-header">
+                                <div>
+                                    <h4>Source Mapping Check</h4>
+                                </div>
+                                <span class="cr-chip parser-owned">Parser-owned</span>
+                            </div>
+
+                            <div class="cr-section-scroll">
+                                <table class="cr-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Field @HelpIcon("Parser-owned source mapping field being compared.")</th>
+                                            <th>Current Parse @HelpIcon("Runtime parser output from the live SQL view. Parser-owned structure is refreshed from this side when merge is applied.")</th>
+                                            <th>Prior Parse @HelpIcon("Parser-owned values saved from the previous parse. This is informational and is not a business metadata choice.")</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in SelectedCandidate.SourceRows)
+                                        {
+                                            <tr @key="row.Label" class="@GetComparisonRowClass(row)">
+                                                <td>@row.Label</td>
+                                                <td>@DisplayValue(row.CurrentValue)</td>
+                                                <td>@DisplayValue(row.PriorValue)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    }
+                    else
+                    {
+                        <section class="cr-section">
+                            <div class="cr-section-header">
+                                <div>
+                                    <h4>Business Values</h4>
+                                </div>
+                            </div>
+
+                            <div class="cr-section-scroll">
+                                <table class="cr-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Field @HelpIcon("Business metadata field being compared.")</th>
+                                            <th>Current Parsed Values @HelpIcon("Business metadata read from annotations in the current parser run. Blank means the current SQL did not declare a local business value.")</th>
+                                            <th>@SelectedCandidate.SavedValuesHeader @HelpIcon(SelectedCandidate.SavedValuesHelp)</th>
+                                            <th>Merge Result @HelpIcon("The business metadata value that will be staged by Apply Merge based on the selected choice.")</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var row in SelectedCandidate.BusinessRows)
+                                        {
+                                            <tr @key="row.Label">
+                                                <td>@row.Label</td>
+                                                <td>@FieldValue(row.ParsedValue, row.IsMultiline, cssClass: GetBusinessValueClass(row))</td>
+                                                <td>@FieldValue(row.SavedValue, row.IsMultiline, row.SavedMissingText, GetBusinessValueClass(row))</td>
+                                                <td>@ResultValue(SelectedCandidate, row)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            @if (SelectedCandidate.IsChoiceEditable)
+                            {
+                                <div class="cr-choice-row">
+                                    <label class="@GetChoiceClass(SelectedCandidate, BusinessValueChoice.KeepSaved)">
+                                        <input type="radio"
+                                               name="business-value-choice"
+                                               checked="@(SelectedCandidate.Choice == BusinessValueChoice.KeepSaved)"
+                                               @onchange="@(() => SelectedCandidate.SetChoice(BusinessValueChoice.KeepSaved))" />
+                                        <span>
+                                            <strong>@SelectedCandidate.KeepSavedChoiceTitle</strong>
+                                            <small>@SelectedCandidate.KeepSavedChoiceDescription</small>
+                                        </span>
+                                    </label>
+
+                                    <label class="@GetChoiceClass(SelectedCandidate, BusinessValueChoice.AcceptParsed)">
+                                        <input type="radio"
+                                               name="business-value-choice"
+                                               checked="@(SelectedCandidate.Choice == BusinessValueChoice.AcceptParsed)"
+                                               @onchange="@(() => SelectedCandidate.SetChoice(BusinessValueChoice.AcceptParsed))" />
+                                        <span>
+                                            <strong>Accept New Parsed Values</strong>
+                                            <small>Replace saved business values with values from the current parse.</small>
+                                        </span>
+                                    </label>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="cr-fixed-choice">@SelectedCandidate.FixedChoiceText</div>
+                            }
+                        </section>
+                    }
+                </div>
+            </section>
+        </main>
+    }
+
+    <footer class="cr-footer">
+        <span>Showing @FilteredCandidates.Count of @Candidates.Count columns</span>
+        <div class="cr-actions">
+            <RadzenButton Text="Cancel"
+                          ButtonStyle="ButtonStyle.Light"
+                          Click="@Cancel" />
+            <RadzenButton Text="Apply Merge"
+                          Icon="published_with_changes"
+                          Disabled="@(Candidates.Count == 0)"
+                          Click="@ApplyMerge" />
+        </div>
+    </footer>
+</div>
+
+@code {
+    private const string AllStatus = "All";
+    private const string AddedStatus = "Added";
+    private const string NeedsReviewStatus = "Needs Review";
+    private const string RemovedStatus = "Removed";
+    private const string UnchangedStatus = "Unchanged";
+    private const string ParsedMetadataStatus = "Parsed Metadata";
+    private const string InheritedStatus = "Inherited";
+    private const string DeclaredStatus = "Declared";
+    private const string LocalOverrideStatus = "Local Override";
+    private const string HasValuesStatus = "Has Values";
+    private const string BlankStatus = "Blank";
+    private const string BusinessValuesTab = "Business Values";
+    private const string SourceMappingTab = "Source Mapping Check";
+
+    [Parameter]
+    public string ViewDisplayName { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsBaseView { get; set; }
+
+    [Parameter]
+    public int SchemaObjectId { get; set; }
+
+    [Parameter]
+    public ParsedQuery? ParsedView { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<ViewSourcedColumnDefinition> ParsedColumns { get; set; } = Array.Empty<ViewSourcedColumnDefinition>();
+
+    [Parameter]
+    public IList<SchemaObjectColumnDefinition> SavedColumns { get; set; } = Array.Empty<SchemaObjectColumnDefinition>();
+
+    private string SearchText { get; set; } = string.Empty;
+    private string StatusFilter { get; set; } = NeedsReviewStatus;
+    private string? SelectedColumnName { get; set; }
+    private string SelectedDetailTab { get; set; } = BusinessValuesTab;
+    private bool IsNavigationHidden { get; set; } = true;
+    private List<ReconciliationCandidate> Candidates { get; set; } = new();
+    private List<ReconciliationCandidate> FilteredCandidates { get; set; } = new();
+    private List<CountChip> CountChips { get; set; } = new();
+
+    private IReadOnlyList<string> StatusOptions { get; } =
+    [
+        AllStatus,
+        NeedsReviewStatus,
+        AddedStatus,
+        RemovedStatus,
+        UnchangedStatus,
+        ParsedMetadataStatus,
+        InheritedStatus,
+        DeclaredStatus,
+        LocalOverrideStatus,
+        HasValuesStatus,
+        BlankStatus
+    ];
+
+    private IReadOnlyList<SourceTable> CurrentSources => ParsedView?.SourceTables ?? [];
+
+    private string CurrentViewSourceName => string.IsNullOrWhiteSpace(ViewDisplayName)
+        ? "Current parsed view"
+        : ViewDisplayName;
+
+    private ReconciliationCandidate? SelectedCandidate =>
+        FilteredCandidates.FirstOrDefault(candidate => string.Equals(candidate.ColumnName, SelectedColumnName, StringComparison.OrdinalIgnoreCase));
+
+    private int SelectedIndex =>
+        SelectedCandidate == null
+            ? -1
+            : FilteredCandidates.FindIndex(candidate => string.Equals(candidate.ColumnName, SelectedCandidate.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        Candidates = BuildCandidates();
+
+        if (Candidates.Count > 0 && Candidates.All(x => x.Status == ReconciliationStatus.Added))
+        {
+            StatusFilter = AddedStatus;
+        }
+        else if (!Candidates.Any(MatchesStatusFilter))
+        {
+            StatusFilter = AllStatus;
+        }
+
+        RefreshViewState();
+    }
+
+    private List<ReconciliationCandidate> BuildCandidates()
+    {
+        var parsedByName = ParsedColumns
+            .Where(x => !string.IsNullOrWhiteSpace(x.ColumnName))
+            .GroupBy(x => x.ColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+
+        var savedByName = SavedColumns
+            .Where(x => !string.IsNullOrWhiteSpace(x.SourceColumnName))
+            .GroupBy(x => x.SourceColumnName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+
+        return parsedByName.Keys
+            .Union(savedByName.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => parsedByName.TryGetValue(name, out var parsed) ? parsed.OrdinalPosition : int.MaxValue)
+            .ThenBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(name =>
+            {
+                parsedByName.TryGetValue(name, out var parsed);
+                savedByName.TryGetValue(name, out var saved);
+                return new ReconciliationCandidate(name, parsed, saved, IsBaseView);
+            })
+            .ToList();
+    }
+
+    private bool MatchesStatusFilter(ReconciliationCandidate candidate) =>
+        StatusFilter switch
+        {
+            AddedStatus => candidate.Status == ReconciliationStatus.Added,
+            NeedsReviewStatus => candidate.Status == ReconciliationStatus.NeedsReview,
+            RemovedStatus => candidate.Status == ReconciliationStatus.Removed,
+            UnchangedStatus => candidate.Status == ReconciliationStatus.Unchanged,
+            ParsedMetadataStatus => candidate.HasParsedMetadata,
+            InheritedStatus => candidate.SavedBusinessValuesAreInherited,
+            DeclaredStatus => candidate.SavedBusinessValuesAreDeclared,
+            LocalOverrideStatus => candidate.SavedBusinessValuesAreLocalOverride,
+            HasValuesStatus => candidate.SavedBusinessValuesHaveValues,
+            BlankStatus => candidate.SavedBusinessValuesAreBlank,
+            _ => true
+        };
+
+    private bool MatchesSearch(ReconciliationCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText))
+        {
+            return true;
+        }
+
+        var search = SearchText.Trim();
+        return Contains(candidate.ColumnName, search)
+            || Contains(candidate.Parsed?.BusinessName, search)
+            || Contains(candidate.Parsed?.BusinessDescription, search)
+            || Contains(candidate.Saved?.BusinessName, search)
+            || Contains(candidate.Saved?.BusinessDescription, search)
+            || candidate.SourceRows.Any(row => Contains(row.CurrentValue, search) || Contains(row.PriorValue, search));
+    }
+
+    private void SetStatusFilter(string status)
+    {
+        StatusFilter = status;
+        RefreshViewState();
+    }
+
+    private void ToggleNavigation()
+    {
+        IsNavigationHidden = !IsNavigationHidden;
+    }
+
+    private void SelectCandidate(ReconciliationCandidate candidate)
+    {
+        SelectedColumnName = candidate.ColumnName;
+    }
+
+    private void RefreshViewState()
+    {
+        CountChips = BuildCountChips();
+        FilteredCandidates = Candidates
+            .Where(MatchesStatusFilter)
+            .Where(MatchesSearch)
+            .ToList();
+        EnsureValidSelection();
+    }
+
+    private List<CountChip> BuildCountChips() =>
+    [
+        new CountChip(NeedsReviewStatus, "Needs Review", Candidates.Count(x => x.Status == ReconciliationStatus.NeedsReview), "Columns where the parser snapshot and saved repository shape need review before applying parser changes."),
+        new CountChip(AddedStatus, "Added", Candidates.Count(x => x.Status == ReconciliationStatus.Added), "Columns present in the current parser snapshot but not yet saved in the repository."),
+        new CountChip(RemovedStatus, "Removed", Candidates.Count(x => x.Status == ReconciliationStatus.Removed), "Columns saved in the repository that are no longer present in the current parser snapshot."),
+        new CountChip(UnchangedStatus, "Unchanged", Candidates.Count(x => x.Status == ReconciliationStatus.Unchanged), "Columns whose parser-owned shape/source mapping does not need reconciliation. Inherited business values may still differ from parser annotations by design."),
+        new CountChip(ParsedMetadataStatus, "Parsed Metadata", Candidates.Count(x => x.HasParsedMetadata), "Columns where the current SQL parse found business metadata annotations."),
+        new CountChip(InheritedStatus, "Inherited", Candidates.Count(x => x.SavedBusinessValuesAreInherited), "Columns whose saved business values are inherited from an upstream semantic source and are not locally owned here."),
+        new CountChip(DeclaredStatus, "Declared", Candidates.Count(x => x.SavedBusinessValuesAreDeclared), "Columns whose saved business values are declared on this base definition."),
+        new CountChip(LocalOverrideStatus, "Local Override", Candidates.Count(x => x.SavedBusinessValuesAreLocalOverride), "Columns where inheritance is disabled so this definition keeps a local business meaning."),
+        new CountChip(HasValuesStatus, "Has Values", Candidates.Count(x => x.SavedBusinessValuesHaveValues), "Columns with at least one saved business name or business description value."),
+        new CountChip(BlankStatus, "Blank", Candidates.Count(x => x.SavedBusinessValuesAreBlank), "Columns with no saved business name or business description value.")
+    ];
+
+    private void EnsureValidSelection()
+    {
+        if (FilteredCandidates.Any(candidate => string.Equals(candidate.ColumnName, SelectedColumnName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        SelectedColumnName = FilteredCandidates.FirstOrDefault()?.ColumnName;
+    }
+
+    private void SelectPrevious()
+    {
+        if (SelectedIndex > 0)
+        {
+            SelectedColumnName = FilteredCandidates[SelectedIndex - 1].ColumnName;
+        }
+    }
+
+    private void SelectNext()
+    {
+        if (SelectedIndex >= 0 && SelectedIndex < FilteredCandidates.Count - 1)
+        {
+            SelectedColumnName = FilteredCandidates[SelectedIndex + 1].ColumnName;
+        }
+    }
+
+    private void ApplyMerge()
+    {
+        foreach (var candidate in Candidates)
+        {
+            if (candidate.Parsed == null)
+            {
+                if (candidate.Saved != null)
+                {
+                    candidate.Saved.MergeState = SchemaObjectColumnMergeState.PendingRemove;
+                }
+
+                continue;
+            }
+
+            if (candidate.Saved == null)
+            {
+                var column = CreateColumn(candidate.Parsed);
+                column.DisableInheritance = candidate.ResultDisableInheritance;
+                column.MergeState = SchemaObjectColumnMergeState.PendingAdd;
+                SavedColumns.Add(column);
+                continue;
+            }
+
+            ApplyParserStructure(candidate.Saved, candidate.Parsed, IsBaseView);
+            candidate.Saved.IsDirty = true;
+            if (candidate.Status == ReconciliationStatus.Added)
+            {
+                candidate.Saved.MergeState = SchemaObjectColumnMergeState.PendingAdd;
+            }
+            else if (candidate.Status != ReconciliationStatus.Unchanged &&
+                candidate.Saved.MergeState != SchemaObjectColumnMergeState.PendingAdd)
+            {
+                candidate.Saved.MergeState = SchemaObjectColumnMergeState.PendingUpdate;
+            }
+
+            if (candidate.Choice == BusinessValueChoice.AcceptParsed)
+            {
+                candidate.Saved.BusinessName = NormalizeNullableText(candidate.Parsed.BusinessName);
+                candidate.Saved.BusinessDescription = NormalizeNullableText(candidate.Parsed.BusinessDescription);
+            }
+
+            candidate.Saved.DisableInheritance = candidate.ResultDisableInheritance;
+        }
+
+        DialogService.Close(true);
+    }
+
+    private SchemaObjectColumnDefinition CreateColumn(ViewSourcedColumnDefinition parsed)
+    {
+        var column = new SchemaObjectColumnDefinition
+        {
+            SchemaObjectColumnId = 0,
+            SchemaObjectId = SchemaObjectId,
+            DeveloperNotes = null
+        };
+
+        ApplyParserStructure(column, parsed, IsBaseView);
+        column.BusinessName = NormalizeNullableText(parsed.BusinessName);
+        column.BusinessDescription = NormalizeNullableText(parsed.BusinessDescription);
+        column.DisableInheritance = parsed.DisableInheritance;
+        return column;
+    }
+
+    private static void ApplyParserStructure(SchemaObjectColumnDefinition saved, ViewSourcedColumnDefinition parsed, bool isBaseView)
+    {
+        saved.OrdinalPosition = parsed.OrdinalPosition;
+        saved.SourceColumnName = parsed.ColumnName ?? string.Empty;
+        saved.SourceColumnKind = NormalizeNullableText(parsed.ColumnKind.ToString());
+        saved.BaseDatabaseName = NormalizeNullableText(parsed.BaseDatabase);
+        saved.BaseSchemaName = NormalizeNullableText(parsed.BaseSchema);
+        saved.BaseObjectName = NormalizeNullableText(parsed.BaseTable);
+        saved.BaseColumnName = NormalizeNullableText(parsed.BaseColumn);
+        saved.SemanticDatabase = NormalizeNullableText(parsed.SemanticDatabase);
+        saved.SemanticSchema = NormalizeNullableText(parsed.SemanticSchema);
+        saved.SemanticObject = NormalizeNullableText(parsed.SemanticObject);
+        saved.SemanticColumn = NormalizeNullableText(parsed.SemanticColumn);
+        saved.IsBaseDefinition = isBaseView;
+    }
+
+    private async Task OpenHelpAsync()
+    {
+        await DialogService.OpenAsync<HelpDialog>(
+            "Schema Studio Help Console",
+            new Dictionary<string, object?>
+            {
+                { "InitialSubjectId", "column-reconciliation" }
+            },
+            new DialogOptions
+            {
+                Width = "1200px",
+                Height = "800px",
+                Resizable = true,
+                Draggable = false,
+                CloseDialogOnOverlayClick = false
+            });
+    }
+
+    private void Cancel()
+    {
+        DialogService.Close(null);
+    }
+
+    private RenderFragment HelpIcon(string helpText) => builder =>
+    {
+        builder.OpenComponent<RadzenIcon>(0);
+        builder.AddAttribute(1, "Icon", "help_outline");
+        builder.AddAttribute(2, "title", helpText);
+        builder.AddAttribute(3, "class", "cr-help-icon");
+        builder.AddAttribute(4, "MouseEnter", EventCallback.Factory.Create<ElementReference>(this, args => TooltipService.Open(args, helpText)));
+        builder.CloseComponent();
+    };
+
+    private RenderFragment FieldValue(string? value, bool multiline, string missingText = "", string? cssClass = null) => builder =>
+    {
+        var displayValue = string.IsNullOrWhiteSpace(value) ? missingText : value;
+        var fieldClass = string.IsNullOrWhiteSpace(cssClass) ? "cr-field-value" : $"cr-field-value {cssClass}";
+        if (multiline)
+        {
+            builder.OpenComponent<RadzenTextArea>(0);
+            builder.AddAttribute(1, "Value", displayValue);
+            builder.AddAttribute(2, "ReadOnly", true);
+            builder.AddAttribute(3, "class", $"cr-textarea {fieldClass}");
+            builder.AddAttribute(4, "Style", "width:100%; max-width:100%; min-width:0; box-sizing:border-box; resize:vertical; overflow-y:scroll;");
+            builder.CloseComponent();
+        }
+        else
+        {
+            builder.OpenComponent<RadzenTextBox>(5);
+            builder.AddAttribute(6, "Value", displayValue);
+            builder.AddAttribute(7, "ReadOnly", true);
+            builder.AddAttribute(8, "class", fieldClass);
+            builder.AddAttribute(9, "Style", "width:100%;");
+            builder.CloseComponent();
+        }
+    };
+
+    private RenderFragment ResultValue(ReconciliationCandidate candidate, BusinessRow row) => builder =>
+    {
+        if (!row.IsDisableInheritance)
+        {
+            builder.AddContent(0, FieldValue(row.ResultValue, row.IsMultiline, row.ResultMissingText));
+            return;
+        }
+
+        builder.OpenComponent<RadzenDropDown<bool>>(1);
+        builder.AddAttribute(2, "Data", BoolOptions);
+        builder.AddAttribute(3, "Value", candidate.ResultDisableInheritance);
+        builder.AddAttribute(4, "ValueChanged", EventCallback.Factory.Create<bool>(this, value => candidate.ResultDisableInheritance = value));
+        builder.AddAttribute(5, "TextProperty", nameof(BoolOption.Label));
+        builder.AddAttribute(6, "ValueProperty", nameof(BoolOption.Value));
+        builder.AddAttribute(7, "Style", "width:100%;");
+        builder.CloseComponent();
+    };
+
+    private string GetColumnButtonClass(ReconciliationCandidate candidate) =>
+        string.Equals(candidate.ColumnName, SelectedCandidate?.ColumnName, StringComparison.OrdinalIgnoreCase)
+            ? "cr-column-button selected"
+            : "cr-column-button";
+
+    private string GetCountChipClass(string status) =>
+        string.Equals(StatusFilter, status, StringComparison.Ordinal)
+            ? $"cr-count-chip selected {GetStatusToken(status)}"
+            : $"cr-count-chip {GetStatusToken(status)}";
+
+    private string GetDetailTabClass(string tab) =>
+        string.Equals(SelectedDetailTab, tab, StringComparison.Ordinal)
+            ? "cr-tab-button selected"
+            : "cr-tab-button";
+
+    private static string GetStatusBadgeClass(ReconciliationStatus status) =>
+        $"cr-status-badge {GetStatusToken(GetStatusLabel(status))}";
+
+    private static string GetChoiceClass(ReconciliationCandidate candidate, BusinessValueChoice choice) =>
+        candidate.Choice == choice
+            ? "cr-choice-card selected"
+            : "cr-choice-card";
+
+    private static string? GetBusinessValueClass(BusinessRow row) =>
+        row.IsConflict
+            ? "cr-conflict-value"
+            : row.IsInheritedDifference
+                ? "cr-inherited-value"
+                : null;
+
+    private static string GetComparisonRowClass(ComparisonRow row) =>
+        string.Equals(NormalizeNullableText(row.CurrentValue), NormalizeNullableText(row.PriorValue), StringComparison.Ordinal)
+            ? string.Empty
+            : "changed";
+
+    private static string GetStatusToken(string status) =>
+        status.ToLowerInvariant().Replace(" ", "-");
+
+    private static string GetStatusLabel(ReconciliationStatus status) =>
+        status == ReconciliationStatus.NeedsReview
+            ? NeedsReviewStatus
+            : status.ToString();
+
+    private static string DisplayValue(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value;
+
+    private static bool Contains(string? value, string search) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains(search, StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeNullableText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatBool(bool value) => value ? "Yes" : "No";
+
+    private static string FormatSource(SourceTable source)
+    {
+        var parts = new[] { source.Database, source.Schema, source.Table }
+            .Where(part => !string.IsNullOrWhiteSpace(part));
+        var name = string.Join(".", parts);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = string.IsNullOrWhiteSpace(source.Alias) ? "Derived source" : source.Alias;
+        }
+
+        return string.IsNullOrWhiteSpace(source.Alias)
+            ? name
+            : $"{name} ({source.Alias})";
+    }
+
+    private static string GetSourceKindLabel(SourceTable source) =>
+        source.Kind == SourceKind.DerivedQuery ? "Query" : "Table";
+
+    private enum ReconciliationStatus
+    {
+        Added,
+        Removed,
+        NeedsReview,
+        Unchanged
+    }
+
+    private enum BusinessValueChoice
+    {
+        KeepSaved,
+        AcceptParsed
+    }
+
+    private sealed record CountChip(string Status, string Label, int Count, string HelpText);
+
+    private sealed record ComparisonRow(string Label, string? CurrentValue, string? PriorValue);
+
+    private sealed record BoolOption(bool Value, string Label);
+
+    private sealed record BusinessRow(
+        string Label,
+        string? ParsedValue,
+        string? SavedValue,
+        string? ResultValue,
+        bool IsMultiline,
+        bool IsConflict,
+        bool IsInheritedDifference,
+        bool IsDisableInheritance,
+        string SavedMissingText,
+        string ResultMissingText);
+
+    private IReadOnlyList<BoolOption> BoolOptions { get; } =
+    [
+        new(false, "No"),
+        new(true, "Yes")
+    ];
+
+    private sealed class ReconciliationCandidate
+    {
+        public ReconciliationCandidate(string columnName, ViewSourcedColumnDefinition? parsed, SchemaObjectColumnDefinition? saved, bool isBaseView)
+        {
+            ColumnName = columnName;
+            Parsed = parsed;
+            Saved = saved;
+            IsBaseView = isBaseView;
+            Status = DetermineStatus(parsed, saved, isBaseView);
+            Choice = Status == ReconciliationStatus.Added
+                ? BusinessValueChoice.AcceptParsed
+                : BusinessValueChoice.KeepSaved;
+            ResultDisableInheritance = GetDefaultDisableInheritance(Choice);
+        }
+
+        public string ColumnName { get; }
+        public ViewSourcedColumnDefinition? Parsed { get; }
+        public SchemaObjectColumnDefinition? Saved { get; }
+        public bool IsBaseView { get; }
+        public ReconciliationStatus Status { get; }
+        public BusinessValueChoice Choice { get; private set; }
+        public bool ResultDisableInheritance { get; set; }
+        public bool IsChoiceEditable => Status == ReconciliationStatus.NeedsReview && Saved != null && Parsed != null;
+        public bool HasParsedMetadata => Parsed != null
+            && (!string.IsNullOrWhiteSpace(Parsed.BusinessName)
+                || !string.IsNullOrWhiteSpace(Parsed.BusinessDescription)
+                || Parsed.DisableInheritance);
+
+        public string StatusLabel => GetStatusLabel(Status);
+        public bool SavedBusinessValuesAreInherited => Saved != null && !IsBaseView && !Saved.DisableInheritance;
+        public bool SavedBusinessValuesAreLocalOverride => Saved != null && !IsBaseView && Saved.DisableInheritance;
+        public bool SavedBusinessValuesAreDeclared => Saved != null && IsBaseView;
+        public bool SavedBusinessValuesHaveValues => Saved != null
+            && (!string.IsNullOrWhiteSpace(Saved.BusinessName)
+                || !string.IsNullOrWhiteSpace(Saved.BusinessDescription));
+        public bool SavedBusinessValuesAreBlank => Saved != null && !SavedBusinessValuesHaveValues;
+        public string ValueStateHelp => SavedBusinessValuesAreBlank
+            ? $"{SavedOriginLabel} business values are blank."
+            : $"{SavedOriginLabel} business values have a business name or description.";
+        public string SavedOriginLabel => Saved == null
+            ? string.Empty
+            : SavedBusinessValuesAreInherited
+                ? "Inherited"
+                : SavedBusinessValuesAreLocalOverride
+                    ? "Local Override"
+                    : "Declared";
+        public string SavedOriginHelp => Saved == null
+            ? string.Empty
+            : SavedBusinessValuesAreInherited
+                ? "Saved business values came from semantic inheritance: this is a non-base view and inheritance is allowed."
+                : SavedBusinessValuesAreLocalOverride
+                    ? "Saved business values are protected on this non-base view because inheritance is disabled."
+                    : "Saved business values are declared on this base definition.";
+        public string SavedValuesHeader => SavedBusinessValuesAreInherited
+            ? "Inherited Saved Values"
+            : SavedBusinessValuesAreLocalOverride
+                ? "Local Override Values"
+                : "Saved Values";
+        public string SavedValuesHelp => SavedBusinessValuesAreInherited
+            ? "These saved business values were populated by semantic inheritance. A blank current parse means the SQL did not declare a local replacement."
+            : SavedBusinessValuesAreLocalOverride
+                ? "These saved business values are local override values because inheritance is disabled for this non-base column."
+                : "Business metadata currently saved for this column. Keeping saved values makes no business metadata change.";
+        public string KeepSavedChoiceTitle => SavedBusinessValuesAreInherited
+            ? "Keep Inherited Saved Values"
+            : SavedBusinessValuesAreLocalOverride
+                ? "Keep Local Override Values"
+                : "Keep Saved Business Values";
+        public string KeepSavedChoiceDescription => SavedBusinessValuesAreInherited
+            ? "Preserve the inherited business name, description, and inheritance setting."
+            : SavedBusinessValuesAreLocalOverride
+                ? "Preserve the local override business name, description, and inheritance setting."
+                : "Preserve the saved business name, description, and inheritance setting.";
+        public string FixedChoiceText => Status switch
+        {
+            ReconciliationStatus.Added => "New columns accept parsed business values.",
+            ReconciliationStatus.Removed => "Removed columns are informational.",
+            ReconciliationStatus.Unchanged => "No business value choice needed.",
+            _ => Choice == BusinessValueChoice.AcceptParsed ? "Accept New Parsed Values" : "Keep Saved Business Values"
+        };
+
+        public void SetChoice(BusinessValueChoice choice)
+        {
+            Choice = choice;
+            ResultDisableInheritance = GetDefaultDisableInheritance(choice);
+        }
+
+        public IReadOnlyList<ComparisonRow> SourceRows =>
+        [
+            new ComparisonRow(
+                "Ordinal",
+                Parsed == null ? null : Parsed.OrdinalPosition.ToString(),
+                Saved == null ? null : Saved.OrdinalPosition.ToString()),
+            new ComparisonRow(
+                "Source Kind",
+                Parsed == null ? null : Parsed.ColumnKind.ToString(),
+                Saved?.SourceColumnKind),
+            new ComparisonRow(
+                "Physical Lineage",
+                FormatQualifiedName(Parsed?.BaseDatabase, Parsed?.BaseSchema, Parsed?.BaseTable, Parsed?.BaseColumn),
+                FormatQualifiedName(Saved?.BaseDatabaseName, Saved?.BaseSchemaName, Saved?.BaseObjectName, Saved?.BaseColumnName)),
+            new ComparisonRow(
+                "Semantic Source",
+                FormatQualifiedName(Parsed?.SemanticDatabase, Parsed?.SemanticSchema, Parsed?.SemanticObject, Parsed?.SemanticColumn),
+                FormatQualifiedName(Saved?.SemanticDatabase, Saved?.SemanticSchema, Saved?.SemanticObject, Saved?.SemanticColumn)),
+            new ComparisonRow(
+                "Base Object",
+                FormatQualifiedName(Parsed?.BaseDatabase, Parsed?.BaseSchema, Parsed?.BaseTable, null),
+                FormatQualifiedName(Saved?.BaseDatabaseName, Saved?.BaseSchemaName, Saved?.BaseObjectName, null)),
+            new ComparisonRow(
+                "Base Column",
+                Parsed?.BaseColumn,
+                Saved?.BaseColumnName)
+        ];
+
+        public IReadOnlyList<BusinessRow> BusinessRows =>
+        [
+            new BusinessRow(
+                "Business Name",
+                Parsed?.BusinessName,
+                Saved?.BusinessName,
+                Choice == BusinessValueChoice.AcceptParsed ? Parsed?.BusinessName : Saved?.BusinessName,
+                false,
+                HasBusinessValueConflict(Parsed?.BusinessName, Saved?.BusinessName),
+                IsInheritedValueWithBlankCurrentParse(Parsed?.BusinessName, Saved?.BusinessName),
+                false,
+                Saved == null ? "Not saved yet" : string.Empty,
+                string.Empty),
+            new BusinessRow(
+                "Business Description",
+                Parsed?.BusinessDescription,
+                Saved?.BusinessDescription,
+                Choice == BusinessValueChoice.AcceptParsed ? Parsed?.BusinessDescription : Saved?.BusinessDescription,
+                true,
+                HasBusinessValueConflict(Parsed?.BusinessDescription, Saved?.BusinessDescription),
+                IsInheritedValueWithBlankCurrentParse(Parsed?.BusinessDescription, Saved?.BusinessDescription),
+                false,
+                Saved == null ? "Not saved yet" : string.Empty,
+                string.Empty),
+            new BusinessRow(
+                "Disable Inheritance",
+                Parsed == null ? null : FormatBool(Parsed.DisableInheritance),
+                Saved == null ? null : FormatBool(Saved.DisableInheritance),
+                FormatBool(ResultDisableInheritance),
+                false,
+                Parsed != null && Saved != null && Parsed.DisableInheritance != Saved.DisableInheritance,
+                false,
+                true,
+                Saved == null ? "Not saved yet" : "No",
+                "No")
+        ];
+
+        private bool GetDefaultDisableInheritance(BusinessValueChoice choice) =>
+            choice == BusinessValueChoice.AcceptParsed
+                ? Parsed?.DisableInheritance ?? false
+                : Saved?.DisableInheritance ?? false;
+
+        private bool HasBusinessValueConflict(string? parsedValue, string? savedValue) =>
+            Parsed != null
+            && Saved != null
+            && !IsInheritedValueWithBlankCurrentParse(parsedValue, savedValue)
+            && !string.Equals(NormalizeNullableText(parsedValue), NormalizeNullableText(savedValue), StringComparison.Ordinal);
+
+        private bool IsInheritedValueWithBlankCurrentParse(string? parsedValue, string? savedValue) =>
+            SavedBusinessValuesAreInherited
+            && string.IsNullOrWhiteSpace(parsedValue)
+            && !string.IsNullOrWhiteSpace(savedValue);
+
+        private static ReconciliationStatus DetermineStatus(ViewSourcedColumnDefinition? parsed, SchemaObjectColumnDefinition? saved, bool isBaseView)
+        {
+            if (saved?.MergeState is SchemaObjectColumnMergeState.DetectedAdd or SchemaObjectColumnMergeState.PendingAdd)
+            {
+                return ReconciliationStatus.Added;
+            }
+
+            if (saved?.MergeState is SchemaObjectColumnMergeState.DetectedRemove or SchemaObjectColumnMergeState.PendingRemove)
+            {
+                return ReconciliationStatus.Removed;
+            }
+
+            if (parsed != null && saved == null)
+            {
+                return ReconciliationStatus.Added;
+            }
+
+            if (parsed == null && saved != null)
+            {
+                return ReconciliationStatus.Removed;
+            }
+
+            if (parsed == null || saved == null)
+            {
+                return ReconciliationStatus.Unchanged;
+            }
+
+            if (!SourceRowsMatch(parsed, saved))
+            {
+                return ReconciliationStatus.NeedsReview;
+            }
+
+            if (!isBaseView)
+            {
+                return ReconciliationStatus.Unchanged;
+            }
+
+            var nameChanged = !string.Equals(NormalizeNullableText(parsed.BusinessName), NormalizeNullableText(saved.BusinessName), StringComparison.Ordinal);
+            var descriptionChanged = !string.Equals(NormalizeNullableText(parsed.BusinessDescription), NormalizeNullableText(saved.BusinessDescription), StringComparison.Ordinal);
+            var inheritanceChanged = parsed.DisableInheritance != saved.DisableInheritance;
+
+            return nameChanged || descriptionChanged || inheritanceChanged
+                ? ReconciliationStatus.NeedsReview
+                : ReconciliationStatus.Unchanged;
+        }
+
+        private static bool SourceRowsMatch(ViewSourcedColumnDefinition parsed, SchemaObjectColumnDefinition saved) =>
+            parsed.OrdinalPosition == saved.OrdinalPosition
+            && string.Equals(NormalizeNullableText(parsed.ColumnKind.ToString()), NormalizeNullableText(saved.SourceColumnKind), StringComparison.Ordinal)
+            && string.Equals(FormatQualifiedName(parsed.BaseDatabase, parsed.BaseSchema, parsed.BaseTable, parsed.BaseColumn), FormatQualifiedName(saved.BaseDatabaseName, saved.BaseSchemaName, saved.BaseObjectName, saved.BaseColumnName), StringComparison.Ordinal)
+            && string.Equals(FormatQualifiedName(parsed.SemanticDatabase, parsed.SemanticSchema, parsed.SemanticObject, parsed.SemanticColumn), FormatQualifiedName(saved.SemanticDatabase, saved.SemanticSchema, saved.SemanticObject, saved.SemanticColumn), StringComparison.Ordinal);
+
+        private static string? FormatQualifiedName(string? database, string? schema, string? objectName, string? columnName)
+        {
+            var parts = new[] { database, schema, objectName, columnName }
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+                .Select(part => part!.Trim())
+                .ToList();
+            return parts.Count == 0 ? null : string.Join(".", parts);
+        }
+    }
+}

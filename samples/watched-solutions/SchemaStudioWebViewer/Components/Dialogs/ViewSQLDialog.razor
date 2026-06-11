@@ -1,0 +1,71 @@
+﻿@using SchemaStudioWebViewer.Models
+@using SchemaStudio.AIHelpers
+@inject IJSRuntime JSRuntime
+
+@attribute [FileVersion("1.0")]
+@attribute [AIFileContext("Components/Dialogs/ViewSQLDialog.razor", "Displays parser or view SQL in a read-only Prism-highlighted dialog with local light-theme SQL token colors for SSMS-style readability.")]
+
+<RadzenStack Gap="0.75rem" Style="padding: 10px; height: 100%; overflow: hidden;">
+    @if (IsMock)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Shade="Shade.Light">
+            View retrieval failed. Sample SQL is being shown instead.
+        </RadzenAlert>
+    }
+
+    <div class="sql-code-container" style="--sql-keyword-color: #0000ff; --sql-comment-color: #008000; --sql-string-color: #a31515; flex-grow: 1; border: @(IsMock ? "2px solid #dc3545" : "1px solid #c9d1d9"); border-radius: 4px; overflow: auto; background: #ffffff; color: #111827;">
+        <pre class="language-sql" style="margin: 0; min-height: 100%; background: #ffffff !important; color: #111827 !important; text-shadow: none;"><code class="language-sql" style="background: #ffffff !important; color: #111827; text-shadow: none;">@SqlContent</code></pre>
+    </div>
+</RadzenStack>
+
+<style>
+    .sql-code-container pre[class*="language-"],
+    .sql-code-container code[class*="language-"] {
+        background: #ffffff !important;
+        color: #111827 !important;
+        text-shadow: none !important;
+    }
+
+    .sql-code-container .token.keyword {
+        color: var(--sql-keyword-color) !important;
+        font-weight: 700;
+    }
+
+    .sql-code-container .token.string {
+        color: var(--sql-string-color) !important;
+    }
+
+    .sql-code-container .token.comment {
+        color: var(--sql-comment-color) !important;
+        font-style: normal;
+        font-weight: 500;
+    }
+
+    .sql-code-container .token.operator,
+    .sql-code-container .token.punctuation {
+        color: #374151 !important;
+    }
+
+    .sql-code-container .token.function,
+    .sql-code-container .token.builtin {
+        color: #0f766e !important;
+    }
+
+    .sql-code-container .token.number {
+        color: #b45309 !important;
+    }
+</style>
+
+@code {
+    [Parameter] public string SqlContent { get; set; }
+    [Parameter] public bool IsMock { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Trigger the highlight with the 30-retry buffer defined in App.razor
+            await JSRuntime.InvokeVoidAsync("highlightSql", 30);
+        }
+    }
+}

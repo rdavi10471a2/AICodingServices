@@ -1,0 +1,270 @@
+﻿@page "/help-editor"
+@using System.Text.Json
+@using SchemaStudioWebViewer.Models
+@using Radzen
+@using Radzen.Blazor
+
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JSRuntime
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+
+<PageTitle>Help File Manager</PageTitle>
+
+@if (!isAuthenticated)
+{
+    <RadzenCard class="rz-my-12 rz-mx-auto rz-p-12" Style="max-width: 450px;">
+        <RadzenStack Gap="1.5rem" AlignItems="AlignItems.Center">
+            <RadzenIcon Icon="lock" Style="font-size: 3rem; color: var(--rz-primary);" />
+            <RadzenText TextStyle="TextStyle.H5">Admin Access Required</RadzenText>
+            <RadzenPassword Placeholder="Enter Admin Password" @bind-Value="@passwordInput"
+                            @onkeypress="@(e => { if (e.Key == "Enter") CheckPassword(); })" Style="width: 100%;" />
+            <RadzenButton Text="Unlock Manager" Click="@CheckPassword" Style="width: 100%;" ButtonStyle="ButtonStyle.Primary" />
+            @if (showError)
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Danger" ShowIcon="false" Variant="Variant.Flat" Size="AlertSize.Small">
+                    Invalid credentials.
+                </RadzenAlert>
+            }
+        </RadzenStack>
+    </RadzenCard>
+}
+else
+{
+    <div class="rz-p-4">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-4">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenIcon Icon="library_books" Style="font-size: 2rem; color: var(--rz-primary);" />
+                <RadzenText TextStyle="TextStyle.H4" class="rz-m-0">Help File Manager</RadzenText>
+            </RadzenStack>
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="1rem">
+                <RadzenButton Text="Save Changes" Icon="save" Click="@SaveJson" ButtonStyle="ButtonStyle.Primary" />
+                <RadzenButton Text="Exit" Icon="logout" Click="@ExitEditor" ButtonStyle="ButtonStyle.Light" />
+            </RadzenStack>
+        </RadzenStack>
+
+        <RadzenRow Gap="1.5rem">
+            @* Sidebar: Subject List *@
+            <RadzenColumn Size="12" SizeMD="3">
+                <RadzenCard Style="height: calc(100vh - 180px); display: flex; flex-direction: column;">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-4">
+                        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">Help Categories</RadzenText>
+                        <RadzenButton Icon="add" Size="ButtonSize.ExtraSmall" Click="@AddSubject" ButtonStyle="ButtonStyle.Secondary" />
+                    </RadzenStack>
+
+                    <RadzenListBox @bind-Value="@SelectedSubject" Data="@HelpSubjects" TValue="HelpSubject"
+                                   Change="@(() => isDirty = true)"
+                                   Style="flex-grow: 1; width: 100%; border: none;">
+                        <Template Context="subject">
+                            @{
+                                var s = subject as HelpSubject;
+                            }
+                            <div class="rz-display-flex rz-align-items-center rz-justify-content-space-between" style="width: 100%;">
+                                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                                    <RadzenIcon Icon="@s.Icon" Style="font-size: 1.1rem;" />
+                                    <RadzenText TextStyle="TextStyle.Body2">@s.Title</RadzenText>
+                                </RadzenStack>
+                                <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Text"
+                                              Click="@(() => RemoveSubject(s))" @onclick:stopPropagation="true" />
+                            </div>
+                        </Template>
+                    </RadzenListBox>
+                </RadzenCard>
+            </RadzenColumn>
+
+            @* Main Body: Editor *@
+            <RadzenColumn Size="12" SizeMD="9">
+                @if (SelectedSubject != null)
+                {
+                    <RadzenCard Style="height: calc(100vh - 180px); overflow-y: auto;">
+                        <RadzenTabs RenderMode="TabRenderMode.Client">
+                            <Tabs>
+                                <RadzenTabsItem Text="Category Metadata" Icon="settings">
+                                    <RadzenStack Gap="1.5rem" class="rz-p-4">
+                                        <RadzenRow Gap="1rem">
+                                            <RadzenColumn Size="6">
+                                                <RadzenFormField Text="Unique ID (Must be Unique)" Style="width: 100%;">
+                                                    <RadzenTextBox @bind-Value="@SelectedSubject.Id" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                                </RadzenFormField>
+                                            </RadzenColumn>
+                                            <RadzenColumn Size="6">
+                                                <RadzenFormField Text="Display Icon" Style="width: 100%;">
+                                                    <RadzenDropDown @bind-Value="@SelectedSubject.Icon" Data="@AvailableIcons" Style="width: 100%;" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Filterable="true" Change="@(() => isDirty = true)">
+                                                        <Template Context="icon">
+                                                            <RadzenIcon Icon="@((string)icon)" class="rz-mr-2" /> @icon
+                                                        </Template>
+                                                    </RadzenDropDown>
+                                                </RadzenFormField>
+                                            </RadzenColumn>
+                                        </RadzenRow>
+                                        <RadzenFormField Text="Title">
+                                            <RadzenTextBox @bind-Value="@SelectedSubject.Title" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                        </RadzenFormField>
+                                        <RadzenFormField Text="Summary / Subtitle">
+                                            <RadzenTextBox @bind-Value="@SelectedSubject.Subtitle" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                        </RadzenFormField>
+                                    </RadzenStack>
+                                </RadzenTabsItem>
+
+                                <RadzenTabsItem Text="Content Sections" Icon="list">
+                                    <RadzenStack Gap="1rem" class="rz-p-4">
+                                        <RadzenButton Text="Add Content Section" Icon="add_circle" Size="ButtonSize.Small"
+                                                      ButtonStyle="ButtonStyle.Secondary" Click="@AddDetail" class="rz-align-self-start rz-mb-2" />
+
+                                        @foreach (var detail in SelectedSubject.Details)
+                                        {
+                                            <RadzenCard variant="Variant.Outlined" class="rz-p-4" Style="background-color: var(--rz-base-100);">
+                                                <RadzenStack Gap="1rem">
+                                                    <RadzenRow AlignItems="AlignItems.Center">
+                                                        <RadzenColumn Size="4">
+                                                            <RadzenFormField Text="Detail Label" Style="width: 100%;">
+                                                                <RadzenTextBox @bind-Value="@detail.Label" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                                            </RadzenFormField>
+                                                        </RadzenColumn>
+                                                        <RadzenColumn Size="3">
+                                                            <RadzenFormField Text="Icon" Style="width: 100%;">
+                                                                <RadzenDropDown @bind-Value="@detail.Icon" Data="@AvailableIcons" Style="width: 100%;" Filterable="true" Change="@(() => isDirty = true)">
+                                                                    <Template Context="icon">
+                                                                        <RadzenIcon Icon="@((string)icon)" class="rz-mr-2" /> @icon
+                                                                    </Template>
+                                                                </RadzenDropDown>
+                                                            </RadzenFormField>
+                                                        </RadzenColumn>
+                                                        <RadzenColumn Size="3">
+                                                            <RadzenFormField Text="Custom Logic (Fragment)" Style="width: 100%;">
+                                                                <RadzenTextBox @bind-Value="@detail.CustomFragmentName" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                                            </RadzenFormField>
+                                                        </RadzenColumn>
+                                                        <RadzenColumn Size="2" class="rz-text-align-right">
+                                                            <RadzenButton Icon="delete" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Flat" Size="ButtonSize.ExtraSmall"
+                                                                          Click="@(() => { SelectedSubject.Details.Remove(detail); isDirty = true; })" />
+                                                        </RadzenColumn>
+                                                    </RadzenRow>
+                                                    <RadzenFormField Text="Section Group">
+                                                        <RadzenTextBox @bind-Value="@detail.Section" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                                    </RadzenFormField>
+                                                    <RadzenFormField Text="Sub-Heading">
+                                                        <RadzenTextBox @bind-Value="@detail.Subtitle" Style="width: 100%;" Change="@(() => isDirty = true)" />
+                                                    </RadzenFormField>
+                                                    <RadzenFormField Text="Body text">
+                                                        <RadzenTextArea @bind-Value="@detail.Description" Rows="6" Style="width: 100%; font-family: monospace;" Change="@(() => isDirty = true)" />
+                                                    </RadzenFormField>
+                                                </RadzenStack>
+                                            </RadzenCard>
+                                        }
+                                    </RadzenStack>
+                                </RadzenTabsItem>
+                            </Tabs>
+                        </RadzenTabs>
+                    </RadzenCard>
+                }
+                else
+                {
+                    <div class="rz-display-flex rz-align-items-center rz-justify-content-center"
+                         style="height: calc(100vh - 180px); border: 2px dashed var(--rz-divider); border-radius: 8px;">
+                        <RadzenText TextStyle="TextStyle.H6" Style="color: var(--rz-base-400);">Choose a category from the sidebar</RadzenText>
+                    </div>
+                }
+            </RadzenColumn>
+        </RadzenRow>
+    </div>
+}
+
+@code {
+    private bool isAuthenticated = false;
+    private string passwordInput = "";
+    private bool showError = false;
+    private bool isDirty = false;
+
+    private List<HelpSubject> HelpSubjects = new();
+    private HelpSubject? SelectedSubject;
+    private string FilePath => Path.Combine(Env.WebRootPath, "data", "help.json");
+
+    private List<string> AvailableIcons = new() {
+        "help", "info", "library_books", "explore", "storage", "code", "terminal",
+        "settings", "article", "hub", "center_focus_strong", "settings_ethernet",
+        "description", "menu_book", "visibility", "lock", "build", "assignment"
+    };
+
+    protected override void OnInitialized()
+    {
+#if DEBUG
+        isAuthenticated = true;
+#endif
+        LoadJson();
+    }
+
+    private void CheckPassword()
+    {
+        if (passwordInput == "SchemaStudio@123")
+        {
+            isAuthenticated = true;
+            showError = false;
+        }
+        else { showError = true; }
+    }
+
+    private void LoadJson()
+    {
+        if (File.Exists(FilePath))
+        {
+            try
+            {
+                HelpSubjects = JsonSerializer.Deserialize<List<HelpSubject>>(File.ReadAllText(FilePath)) ?? new();
+                SelectedSubject = HelpSubjects.FirstOrDefault();
+                isDirty = false;
+            }
+            catch (Exception ex) { Console.WriteLine(ex.Message); }
+        }
+    }
+
+    private async Task SaveJson()
+    {
+        var duplicateIds = HelpSubjects.GroupBy(x => x.Id).Where(g => g.Count() > 1).Select(y => y.Key).ToList();
+        if (duplicateIds.Any())
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"Error: Duplicate IDs found: {string.Join(", ", duplicateIds)}");
+            return;
+        }
+
+        try
+        {
+            var json = JsonSerializer.Serialize(HelpSubjects, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(FilePath, json);
+            isDirty = false;
+            NotificationService.Notify(NotificationSeverity.Success, "Saved", "Help File Manager updated successfully.");
+        }
+        catch (Exception ex) { await JSRuntime.InvokeVoidAsync("alert", "Save failed: " + ex.Message); }
+    }
+
+    private async Task ExitEditor()
+    {
+        if (isDirty)
+        {
+            bool confirm = await JSRuntime.InvokeAsync<bool>("confirm", "You have unsaved changes. Exit anyway?");
+            if (!confirm) return;
+        }
+        NavigationManager.NavigateTo("/");
+    }
+
+    private void AddSubject()
+    {
+        var n = new HelpSubject { Id = "new-" + Guid.NewGuid().ToString().Substring(0, 4), Title = "New Category", Icon = "help" };
+        HelpSubjects.Add(n);
+        SelectedSubject = n;
+        isDirty = true;
+    }
+
+    private void RemoveSubject(HelpSubject s)
+    {
+        HelpSubjects.Remove(s);
+        if (SelectedSubject == s) SelectedSubject = HelpSubjects.FirstOrDefault();
+        isDirty = true;
+    }
+
+    private void AddDetail()
+    {
+        SelectedSubject?.Details.Add(new HelpDetail { Label = "New Detail", Section = "General", Icon = "article" });
+        isDirty = true;
+    }
+}

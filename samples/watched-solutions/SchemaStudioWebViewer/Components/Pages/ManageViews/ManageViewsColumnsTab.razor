@@ -1,0 +1,349 @@
+@using System.ComponentModel.DataAnnotations
+@using System.Reflection
+@using Radzen
+@using Radzen.Blazor
+@using SchemaStudio.AIHelpers
+@using SchemaStudio.Data.Models
+@using SchemaStudioWebViewer.Utils
+
+@inject TooltipService TooltipService
+
+@attribute [FileVersion("1.5")]
+@attribute [AIFileContext("Components/Pages/ManageViews/ManageViewsColumnsTab.razor", "Leaf fragment for the Manage Views Columns tab. Renders the saved-column editing surface as a left-side selector and right-side attribute-aware editor while the parent page owns view-level workflow and save orchestration.")]
+@attribute [AIChange("1.5", "2026-04-30 12:36 PM CDT replaced the saved-columns grid with a selector/editor surface that uses column model metadata for labels, help, and edit limits while leaving parser-owned lineage fields read-only.", AICommandStatus.Pending)]
+@attribute [AIChange("1.4", "2026-04-24 03:01 PM CDT switched the saved-columns grid to advanced filter dropdowns and aligned its header/help presentation with the blue metadata styling used by the Database editor.", AICommandStatus.Pending)]
+@attribute [AIChange("1.3", "2026-04-24 11:30 AM CDT enabled column resizing and in-grid filtering for the saved-columns maintenance surface, and widened the key headers so label-plus-help spacing stays readable.", AICommandStatus.Pending)]
+@attribute [AIChange("1.2", "2026-04-24 11:06 AM CDT moved the saved-columns tab fragment into the shared ManageViews feature folder so the page, fragment, css, and local notes live together.", AICommandStatus.Pending)]
+@attribute [AIChange("1.1", "2026-04-24 10:56 AM CDT removed header fallback text so the saved-columns grid now follows the parser-grid pattern and reads display/description metadata directly from SchemaObjectColumnDefinition.", AICommandStatus.Pending)]
+@attribute [AIChange("1.0", "2026-04-24 10:34 AM CDT extracted the saved-columns maintenance surface from ManageViews into its own fragment so the page shell can stay focused on view definition and sync-launch workflow.", AICommandStatus.Pending)]
+
+@* 2026-04-30 12:36 PM CDT AI v1.5 manage-views-columns-tab marker: saved columns now edit through a left selector and right property editor, with parser-owned lineage fields visible but read-only. *@
+@* 2026-04-24 03:01 PM CDT AI v1.4 manage-views-columns-tab marker: the saved-columns grid now uses advanced filter dropdowns and leans on the same blue metadata header treatment as the Database editor. *@
+@* 2026-04-24 11:30 AM CDT AI v1.3 manage-views-columns-tab marker: the saved-columns grid now supports resize handles, filter boxes, and slightly wider key columns so the header labels and help icons read more cleanly. *@
+@* 2026-04-24 11:06 AM CDT AI v1.2 manage-views-columns-tab marker: this saved-columns fragment now lives beside the page and summary component in the shared ManageViews feature folder. *@
+@* 2026-04-24 10:56 AM CDT AI v1.1 manage-views-columns-tab marker: the saved-columns grid headers now follow the parser-grid pattern and read display/description metadata directly from SchemaObjectColumnDefinition. *@
+@* 2026-04-24 10:34 AM CDT AI v1.0 manage-views-columns-tab marker: the saved-columns maintenance grid now lives in its own leaf fragment with local selection and tooltip-aware headers. *@
+@* Fragment References:
+   - None. Leaf fragment referenced by Components/Pages/ManageViews/ManageViews.razor.
+*@
+
+<div class="manage-views-columns-shell">
+    <div class="manage-views-columns-header">
+        <div>
+            <div class="manage-views-columns-title">@ColumnsTitle</div>
+            <div class="manage-views-columns-subtitle">@ColumnStatusText</div>
+        </div>
+    </div>
+
+    @if (!CanEditColumns)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" class="rz-mt-3">
+            Save the view definition first, then edit the saved columns here.
+        </RadzenAlert>
+    }
+    else if (SavedColumns.Count == 0)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" class="rz-mt-3">
+            No saved columns exist for this view yet. Review merge when you are ready to initialize or synchronize columns.
+        </RadzenAlert>
+    }
+    else
+    {
+        <div class="manage-views-column-editor rz-mt-3">
+            <section class="manage-views-column-selector">
+                <div class="manage-views-column-panel-header">
+                    <span>Columns (@FilteredColumns.Count)</span>
+                    @MetadataHelp(nameof(SchemaObjectColumnDefinition.SourceColumnName))
+                </div>
+                <div class="manage-views-column-filter">
+                    <RadzenTextBox @bind-Value="@columnFilter"
+                                   Placeholder="Filter columns"
+                                   Style="width:100%;"
+                                   Change="@(_ => EnsureSelectedColumn())" />
+                </div>
+                <div class="manage-views-column-list">
+                    @foreach (var column in FilteredColumns)
+                    {
+                        <button type="button"
+                                class="@GetColumnSelectorClass(column)"
+                                title="@BuildColumnTooltip(column)"
+                                @onclick="@(() => SelectColumn(column))">
+                            <span class="manage-views-column-sequence">@column.OrdinalPosition</span>
+                            <span class="manage-views-column-selector-text">
+                                <strong>@column.SourceColumnName</strong>
+                                @if (!string.IsNullOrWhiteSpace(column.BusinessName))
+                                {
+                                    <span>@column.BusinessName</span>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(column.BusinessDescription))
+                                {
+                                    <span>@column.BusinessDescription</span>
+                                }
+                            </span>
+                            @if (column.IsDirty)
+                            {
+                                <span class="manage-views-column-dirty">Changed</span>
+                            }
+                        </button>
+                    }
+                </div>
+            </section>
+
+            <section class="manage-views-column-detail">
+                <div class="manage-views-column-panel-header">
+                    <span>Selected Column</span>
+                    @if (SelectedColumn?.IsDirty == true)
+                    {
+                        <span class="manage-views-column-dirty">Unsaved</span>
+                    }
+                </div>
+
+                @if (SelectedColumn == null)
+                {
+                    <div class="manage-views-column-empty">Select a saved column to edit its business metadata.</div>
+                }
+                else
+                {
+                    <div class="manage-views-column-detail-body">
+                        <div class="manage-views-column-heading">
+                            <span class="manage-views-column-heading-ordinal">@SelectedColumn.OrdinalPosition</span>
+                            <div>
+                                <h3>@SelectedColumn.SourceColumnName</h3>
+                                <p>@(SelectedColumn.SourceColumnKind ?? "Saved column")</p>
+                            </div>
+                        </div>
+
+                        <div class="manage-views-column-readonly-grid">
+                            @ReadOnlyValue(nameof(SchemaObjectColumnDefinition.OrdinalPosition), SelectedColumn.OrdinalPosition.ToString())
+                            @ReadOnlyValue(nameof(SchemaObjectColumnDefinition.SourceColumnName), SelectedColumn.SourceColumnName)
+                            @ReadOnlyValue(nameof(SchemaObjectColumnDefinition.SourceColumnKind), SelectedColumn.SourceColumnKind)
+                            @ReadOnlyValue("SemanticSource", FormatQualifiedName(SelectedColumn.SemanticDatabase, SelectedColumn.SemanticSchema, SelectedColumn.SemanticObject, SelectedColumn.SemanticColumn), "Semantic Source", "Nearest semantic object and column that define this column's meaning.")
+                            @ReadOnlyValue("PhysicalLineage", FormatQualifiedName(SelectedColumn.BaseDatabaseName, SelectedColumn.BaseSchemaName, SelectedColumn.BaseObjectName, SelectedColumn.BaseColumnName), "Physical Lineage", "Physical database, schema, object, and column where this value ultimately comes from.")
+                        </div>
+
+                        <div class="manage-views-column-edit-grid">
+                            <div class="manage-views-column-field">
+                                @FieldLabel(nameof(SchemaObjectColumnDefinition.BusinessName))
+                                <RadzenTextBox @bind-Value="@SelectedColumn.BusinessName"
+                                               MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.BusinessName))"
+                                               Style="width:100%;" />
+                            </div>
+
+                            <div class="manage-views-column-field">
+                                @FieldLabel(nameof(SchemaObjectColumnDefinition.DisableInheritance))
+                                <RadzenCheckBox @bind-Value="@SelectedColumn.DisableInheritance" TValue="bool" />
+                            </div>
+
+                            <div class="manage-views-column-field manage-views-column-field-wide">
+                                @FieldLabel(nameof(SchemaObjectColumnDefinition.BusinessDescription))
+                                <RadzenTextArea @bind-Value="@SelectedColumn.BusinessDescription"
+                                                MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.BusinessDescription))"
+                                                Style="width:100%;"
+                                                class="manage-views-column-textarea" />
+                            </div>
+
+                            <div class="manage-views-column-field manage-views-column-field-wide">
+                                @FieldLabel(nameof(SchemaObjectColumnDefinition.DeveloperNotes))
+                                <RadzenTextArea @bind-Value="@SelectedColumn.DeveloperNotes"
+                                                MaxLength="@GetMaxLength(nameof(SchemaObjectColumnDefinition.DeveloperNotes))"
+                                                Style="width:100%;"
+                                                class="manage-views-column-textarea manage-views-column-notes" />
+                            </div>
+                        </div>
+                    </div>
+                }
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private int? selectedColumnId;
+    private string columnFilter = string.Empty;
+
+    [Parameter]
+    public string? ViewDisplayName { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<SchemaObjectColumnDefinition> SavedColumns { get; set; } = Array.Empty<SchemaObjectColumnDefinition>();
+
+    [Parameter]
+    public bool CanEditColumns { get; set; }
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    private string ColumnsTitle =>
+        string.IsNullOrWhiteSpace(ViewDisplayName)
+            ? "Columns"
+            : $"{ViewDisplayName} - Columns";
+
+    private string ColumnStatusText
+    {
+        get
+        {
+            if (SavedColumns.Count == 0)
+            {
+                return "No saved columns";
+            }
+
+            var dirtyCount = SavedColumns.Count(column => column.IsDirty);
+            return dirtyCount == 0
+                ? $"{SavedColumns.Count} saved columns"
+                : $"{SavedColumns.Count} saved columns, {dirtyCount} unsaved";
+        }
+    }
+
+    private List<SchemaObjectColumnDefinition> FilteredColumns
+    {
+        get
+        {
+            var query = SavedColumns.OrderBy(column => column.OrdinalPosition).AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(columnFilter))
+            {
+                query = query.Where(ColumnMatchesFilter);
+            }
+
+            return query.ToList();
+        }
+    }
+
+    private SchemaObjectColumnDefinition? SelectedColumn =>
+        selectedColumnId == null
+            ? null
+            : SavedColumns.FirstOrDefault(column => GetColumnKey(column) == selectedColumnId.Value);
+
+    protected override void OnParametersSet()
+    {
+        EnsureSelectedColumn();
+    }
+
+    private void EnsureSelectedColumn()
+    {
+        if (SelectedColumn != null && FilteredColumns.Any(column => GetColumnKey(column) == selectedColumnId))
+        {
+            return;
+        }
+
+        selectedColumnId = FilteredColumns.FirstOrDefault() is { } first
+            ? GetColumnKey(first)
+            : null;
+    }
+
+    private void SelectColumn(SchemaObjectColumnDefinition column)
+    {
+        selectedColumnId = GetColumnKey(column);
+    }
+
+    private string GetColumnSelectorClass(SchemaObjectColumnDefinition column) =>
+        SelectedColumn != null && GetColumnKey(column) == GetColumnKey(SelectedColumn)
+            ? "manage-views-column-selector-item selected"
+            : "manage-views-column-selector-item";
+
+    private bool ColumnMatchesFilter(SchemaObjectColumnDefinition column)
+    {
+        var filter = columnFilter.Trim();
+        return Contains(column.SourceColumnName, filter)
+            || Contains(column.BusinessName, filter)
+            || Contains(column.BusinessDescription, filter)
+            || Contains(column.DeveloperNotes, filter);
+    }
+
+    private static bool Contains(string? value, string filter) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private static int GetColumnKey(SchemaObjectColumnDefinition column) =>
+        column.SchemaObjectColumnId > 0
+            ? column.SchemaObjectColumnId
+            : HashCode.Combine(column.SchemaObjectId, column.OrdinalPosition, column.SourceColumnName?.ToUpperInvariant());
+
+    private static string BuildColumnTooltip(SchemaObjectColumnDefinition column)
+    {
+        if (!string.IsNullOrWhiteSpace(column.BusinessDescription))
+        {
+            return string.IsNullOrWhiteSpace(column.BusinessName)
+                ? column.BusinessDescription
+                : $"{column.BusinessName}: {column.BusinessDescription}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(column.BusinessName))
+        {
+            return column.BusinessName;
+        }
+
+        return column.SourceColumnName;
+    }
+
+    private RenderFragment FieldLabel(string propertyName) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "manage-views-column-label");
+        builder.AddContent(2, ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnDefinition), propertyName));
+
+        var description = ReflectionUtils.GetDescription(typeof(SchemaObjectColumnDefinition), propertyName);
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            builder.OpenComponent<RadzenIcon>(3);
+            builder.AddAttribute(4, "Icon", "help_outline");
+            builder.AddAttribute(5, "MouseEnter", EventCallback.Factory.Create<ElementReference>(this, args => TooltipService.Open(args, description)));
+            builder.CloseComponent();
+        }
+
+        builder.CloseElement();
+    };
+
+    private RenderFragment MetadataHelp(string propertyName) => builder =>
+    {
+        var description = ReflectionUtils.GetDescription(typeof(SchemaObjectColumnDefinition), propertyName);
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return;
+        }
+
+        builder.OpenComponent<RadzenIcon>(0);
+        builder.AddAttribute(1, "Icon", "help_outline");
+        builder.AddAttribute(2, "class", "manage-views-column-help");
+        builder.AddAttribute(3, "MouseEnter", EventCallback.Factory.Create<ElementReference>(this, args => TooltipService.Open(args, description)));
+        builder.CloseComponent();
+    };
+
+    private RenderFragment ReadOnlyValue(string propertyName, string? value, string? label = null, string? description = null) => builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "manage-views-column-readonly-item");
+
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "manage-views-column-label");
+        builder.AddContent(4, label ?? ReflectionUtils.GetDisplayName(typeof(SchemaObjectColumnDefinition), propertyName));
+
+        var help = description ?? ReflectionUtils.GetDescription(typeof(SchemaObjectColumnDefinition), propertyName);
+        if (!string.IsNullOrWhiteSpace(help))
+        {
+            builder.OpenComponent<RadzenIcon>(5);
+            builder.AddAttribute(6, "Icon", "help_outline");
+            builder.AddAttribute(7, "MouseEnter", EventCallback.Factory.Create<ElementReference>(this, args => TooltipService.Open(args, help)));
+            builder.CloseComponent();
+        }
+
+        builder.CloseElement();
+
+        builder.OpenElement(8, "strong");
+        builder.AddContent(9, string.IsNullOrWhiteSpace(value) ? "(blank)" : value);
+        builder.CloseElement();
+
+        builder.CloseElement();
+    };
+
+    private static int GetMaxLength(string propertyName)
+    {
+        var attribute = typeof(SchemaObjectColumnDefinition)
+            .GetProperty(propertyName)?
+            .GetCustomAttribute<StringLengthAttribute>();
+
+        return attribute?.MaximumLength ?? 0;
+    }
+
+    private static string FormatQualifiedName(params string?[] parts) =>
+        string.Join(".", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+}

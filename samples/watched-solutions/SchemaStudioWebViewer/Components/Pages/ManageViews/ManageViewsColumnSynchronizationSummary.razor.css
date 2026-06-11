@@ -1,0 +1,36 @@
+.manage-views-sync-summary {
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 1rem;
+    background: #fafbfc;
+}
+
+.manage-views-sync-summary-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+}
+
+.manage-views-sync-summary-title {
+    color: var(--rz-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.manage-views-sync-summary-text {
+    color: #495057;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+@media (max-width: 900px) {
+    .manage-views-sync-summary-grid {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,68 @@
+@using Radzen
+@using Radzen.Blazor
+
+@inject DialogService DialogService
+
+<RadzenStack Gap="1rem" Style="padding: 4px 0 0;">
+    <div style="color: #344054; line-height: 1.45;">
+        Parser-detected column changes remain. Save All will save editable metadata only.
+    </div>
+
+    <div class="unmerged-parser-counts">
+        <div>
+            <span>Changed</span>
+            <strong>@Changed</strong>
+        </div>
+        <div>
+            <span>Added</span>
+            <strong>@Added</strong>
+        </div>
+        <div>
+            <span>Removed</span>
+            <strong>@Removed</strong>
+        </div>
+    </div>
+
+    <div style="color: #667085; line-height: 1.45;">
+        Use Review Merge when you want to apply column shape changes.
+    </div>
+
+    <RadzenStack Orientation="Orientation.Horizontal" Gap="0.75rem" JustifyContent="JustifyContent.SpaceBetween">
+        <RadzenButton Text="Save Metadata" Click="@(() => DialogService.Close(true))" ButtonStyle="ButtonStyle.Primary" Style="flex: 1;" />
+        <RadzenButton Text="Cancel" Click="@(() => DialogService.Close(false))" Variant="Variant.Flat" Style="flex: 1;" />
+    </RadzenStack>
+</RadzenStack>
+
+<style>
+    .unmerged-parser-counts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.5rem;
+    }
+
+    .unmerged-parser-counts div {
+        border: 1px solid #d0d5dd;
+        border-radius: 6px;
+        padding: 0.625rem;
+        background: #f8fafc;
+    }
+
+    .unmerged-parser-counts span {
+        display: block;
+        color: #667085;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .unmerged-parser-counts strong {
+        color: #101828;
+        font-size: 1.125rem;
+    }
+</style>
+
+@code {
+    [Parameter] public int Changed { get; set; }
+    [Parameter] public int Added { get; set; }
+    [Parameter] public int Removed { get; set; }
+}
