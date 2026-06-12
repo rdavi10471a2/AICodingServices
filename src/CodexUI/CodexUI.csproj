@@ -1,4 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\AICodingServices.Core\AICodingServices.Core.csproj" />
+    <ProjectReference Include="..\AICodingServices.Data\AICodingServices.Data.csproj" />
+    <ProjectReference Include="..\AICodingServices.Indexing\AICodingServices.Indexing.csproj" />
+    <ProjectReference Include="..\AICodingServices.Logging\AICodingServices.Logging.csproj" />
+    <ProjectReference Include="..\AICodingServices.McpHub\AICodingServices.McpHub.csproj" />
+  </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

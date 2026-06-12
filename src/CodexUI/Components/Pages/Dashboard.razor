@@ -1,41 +1,96 @@
 @page "/"
 @inject IDashboardViewService DashboardViewService
+@inject IWorkspaceStatusService WorkspaceStatusService
+@rendermode InteractiveServer
 
-<PageTitle>CodexUI Dashboard</PageTitle>
+<PageTitle>Coding Services</PageTitle>
 
-<section class="dashboard">
-    <header class="page-header">
+<section class="overview-page">
+    <header class="overview-hero">
         <div>
-            <p class="eyebrow">Monitor Shell</p>
+            <p class="eyebrow">Coding Services</p>
             <h1>@model.Title</h1>
+            <p class="target-path">@model.WatchedSolutionPath</p>
         </div>
-        <div class="status-pill">@model.EnvironmentLabel</div>
+        <div class="header-actions">
+            <button class="primary-action" type="button" @onclick="RebuildIndexAsync" disabled="@isRebuildingIndex">
+                @(isRebuildingIndex ? "Rebuilding index..." : "Rebuild Index")
+            </button>
+            <div class="status-pill">@model.Workspace.State</div>
+        </div>
     </header>
 
-    <div class="summary-grid">
-        @foreach (DashboardStatusCard card in model.Cards)
-        {
-            <article class="status-card">
-                <span class="card-label">@card.Label</span>
-                <strong>@card.Value</strong>
-                <span class="card-note">@card.Note</span>
-            </article>
-        }
-    </div>
-
-    <section class="work-surface">
-        <div class="panel">
-            <div class="panel-heading">
-                <h2>Watched Solution</h2>
-                <span>@model.WatchedSolutionState</span>
-            </div>
-            <p>@model.WatchedSolutionPath</p>
+    <section class="health-row" aria-label="Coding services status">
+        <div>
+            <span>Projects</span>
+            <strong>@model.Workspace.ProjectCount</strong>
         </div>
+        <div>
+            <span>Documents</span>
+            <strong>@model.Workspace.DocumentCount</strong>
+        </div>
+        <div>
+            <span>Symbols</span>
+            <strong>@model.Workspace.SymbolCount</strong>
+        </div>
+        <div>
+            <span>References</span>
+            <strong>@model.Workspace.ReferenceCount</strong>
+        </div>
+        <div>
+            <span>MCP Hub</span>
+            <strong>@model.McpServer.State</strong>
+        </div>
+    </section>
 
-        <div class="panel">
+    <section class="operations-grid">
+        <article class="operation-panel">
             <div class="panel-heading">
-                <h2>Next Surfaces</h2>
-                <span>placeholders</span>
+                <h2>Index</h2>
+                <span>@model.Workspace.IndexLabel</span>
+            </div>
+            <dl class="detail-list compact-detail-list">
+                <div>
+                    <dt>Database</dt>
+                    <dd>@model.Workspace.IndexDatabasePath</dd>
+                </div>
+                <div>
+                    <dt>Workspace</dt>
+                    <dd>@model.Workspace.WorkspaceRoot</dd>
+                </div>
+            </dl>
+            @if (!string.IsNullOrWhiteSpace(rebuildMessage))
+            {
+                <p class="action-message">@rebuildMessage</p>
+            }
+        </article>
+
+        <article class="operation-panel">
+            <div class="panel-heading">
+                <h2>MCP Hub</h2>
+                <span class="@model.McpServer.StateCssClass">@model.McpServer.State</span>
+            </div>
+            <dl class="detail-list">
+                <div>
+                    <dt>Process</dt>
+                    <dd>@model.McpServer.ProcessLabel</dd>
+                </div>
+                <div>
+                    <dt>Transport</dt>
+                    <dd>@model.McpServer.Transport</dd>
+                </div>
+                <div>
+                    <dt>Started</dt>
+                    <dd>@model.McpServer.StartedLabel</dd>
+                </div>
+            </dl>
+            <p>@model.McpServer.Detail</p>
+        </article>
+
+        <article class="operation-panel workflow-panel">
+            <div class="panel-heading">
+                <h2>Workflow</h2>
+                <span>not connected</span>
             </div>
             <ul class="surface-list">
                 @foreach (string item in model.PendingSurfaces)
@@ -43,15 +98,45 @@
                     <li>@item</li>
                 }
             </ul>
-        </div>
+        </article>
     </section>
 </section>
 
 @code {
     private MonitorDashboardViewModel model = MonitorDashboardViewModel.Empty;
+    private bool isRebuildingIndex;
+    private string rebuildMessage = string.Empty;
 
     protected override void OnInitialized()
     {
         model = DashboardViewService.GetDashboard();
+    }
+
+    private async Task RebuildIndexAsync()
+    {
+        if (isRebuildingIndex)
+        {
+            return;
+        }
+
+        isRebuildingIndex = true;
+        rebuildMessage = string.Empty;
+        try
+        {
+            WorkspaceStatusViewModel workspace = await WorkspaceStatusService.RebuildIndexAsync(CancellationToken.None);
+            model = DashboardViewService.GetDashboard() with
+            {
+                Workspace = workspace
+            };
+            rebuildMessage = "Index rebuild complete.";
+        }
+        catch (Exception ex)
+        {
+            rebuildMessage = ex.Message;
+        }
+        finally
+        {
+            isRebuildingIndex = false;
+        }
     }
 }

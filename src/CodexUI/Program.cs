@@ -1,4 +1,5 @@
 using CodexUI.Components;
+using CodexUI.Data.Repositories;
 using CodexUI.Services;
 
 namespace CodexUI;
@@ -11,7 +12,17 @@ public static class Program
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
+        builder.Services.AddSingleton<McpServerProcessService>();
+        builder.Services.AddSingleton<IMcpServerProcessService>(
+            services => services.GetRequiredService<McpServerProcessService>());
+        builder.Services.AddHostedService(
+            services => services.GetRequiredService<McpServerProcessService>());
+        builder.Services.AddSingleton<ICodexUiMonitorSettingsProvider, CodexUiMonitorSettingsProvider>();
+        builder.Services.AddSingleton<WatchedSolutionIndexRepository>();
+        builder.Services.AddSingleton<WorkspaceRepository>();
+        builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();
         builder.Services.AddSingleton<IDashboardViewService, PlaceholderDashboardViewService>();
+        builder.Services.AddSingleton<IWatchedSolutionViewService, WatchedSolutionViewService>();
 
         WebApplication app = builder.Build();
 

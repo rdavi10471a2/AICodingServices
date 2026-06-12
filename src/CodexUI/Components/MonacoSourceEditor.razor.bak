@@ -1,0 +1,16 @@
+@if (File is not null)
+{
+    <pre class="source-code" aria-label="Read-only source viewer">
+@for (int index = 0; index < File.Lines.Count; index++)
+{
+    int lineNumber = index + 1;
+    string selectedClass = lineNumber == File.SelectedLine ? " selected" : string.Empty;
+    <span id="line-@lineNumber" class="code-line@selectedClass"><span class="line-number">@lineNumber</span><code>@File.Lines[index]</code></span>
+}
+    </pre>
+}
+
+@code {
+    [Parameter]
+    public SourceFileViewModel? File { get; set; }
+}

@@ -1,0 +1,186 @@
+(function () {
+    const editors = new WeakMap();
+    let initializeTimer;
+    let loaderPromise;
+
+    function loadMonaco() {
+        if (window.monaco) {
+            return Promise.resolve();
+        }
+
+        if (loaderPromise) {
+            return loaderPromise;
+        }
+
+        loaderPromise = new Promise((resolve, reject) => {
+            if (!window.require) {
+                reject(new Error("Monaco loader is not available."));
+                return;
+            }
+
+            window.require.config({
+                paths: {
+                    vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs"
+                }
+            });
+
+            window.require(
+                ["vs/editor/editor.main"],
+                () => {
+                    resolve();
+                },
+                reject);
+        });
+
+        return loaderPromise;
+    }
+
+    function uriFromPath(path) {
+        const normalizedPath = String(path || "source.txt").replaceAll("\\", "/");
+        return window.monaco.Uri.parse("file:///" + normalizedPath);
+    }
+
+    function disposeModel(state) {
+        if (state.model) {
+            state.model.dispose();
+            state.model = null;
+        }
+    }
+
+    function revealSelectedLine(state, line) {
+        if (!state.model) {
+            return;
+        }
+
+        const selectedLine = Math.min(line, Math.max(state.model.getLineCount(), 1));
+        state.editor.setSelection(new window.monaco.Range(selectedLine, 1, selectedLine, 1));
+        state.editor.revealLineInCenter(selectedLine);
+        state.decorations = state.editor.deltaDecorations(state.decorations, [
+            {
+                range: new window.monaco.Range(selectedLine, 1, selectedLine, 1),
+                options: {
+                    isWholeLine: true,
+                    className: "selected-source-line"
+                }
+            }
+        ]);
+    }
+
+    async function setSource(element, payload) {
+        const fallback = element.querySelector(".monaco-source-fallback");
+        const host = element.querySelector(".monaco-source-host");
+        if (!host) {
+            if (fallback) {
+                fallback.hidden = false;
+            }
+            return;
+        }
+
+        const line = Math.max(Number(payload.line || 1), 1);
+        const contentKey = [
+            payload.path || "",
+            payload.language || "",
+            String(payload.text || "").length
+        ].join("|");
+        const existingState = editors.get(host);
+        if (element.dataset.monacoContentKey === contentKey && existingState && existingState.model) {
+            if (fallback) {
+                fallback.hidden = true;
+            }
+            host.hidden = false;
+            existingState.editor.layout();
+            revealSelectedLine(existingState, line);
+            return;
+        }
+
+        element.dataset.monacoContentKey = contentKey;
+        await loadMonaco();
+
+        let state = editors.get(host);
+        if (!state) {
+            state = {
+                editor: window.monaco.editor.create(host, {
+                    automaticLayout: true,
+                    fontFamily: "Cascadia Code, Consolas, monospace",
+                    fontSize: 13,
+                    lineNumbers: "on",
+                    minimap: { enabled: true },
+                    readOnly: true,
+                    renderWhitespace: "selection",
+                    scrollBeyondLastLine: false,
+                    theme: "vs",
+                    wordWrap: "off"
+                }),
+                model: null,
+                decorations: []
+            };
+            editors.set(host, state);
+        }
+
+        disposeModel(state);
+        const uri = uriFromPath(payload.path);
+        const existingModel = window.monaco.editor.getModel(uri);
+        if (existingModel) {
+            existingModel.dispose();
+        }
+
+        state.model = window.monaco.editor.createModel(
+            payload.text || "",
+            payload.language || "plaintext",
+            uri);
+        state.editor.setModel(state.model);
+        if (fallback) {
+            fallback.hidden = true;
+        }
+        host.hidden = false;
+        window.monaco.editor.setTheme("vs");
+
+        revealSelectedLine(state, line);
+    }
+
+    function initializeElement(element) {
+        const sourceText = element.querySelector(".monaco-source-text");
+        if (!sourceText) {
+            return;
+        }
+
+        setSource(element, {
+            text: sourceText.value || "",
+            language: element.dataset.language || "plaintext",
+            path: element.dataset.path || "source.txt",
+            line: element.dataset.line || 1
+        }).catch((error) => {
+            delete element.dataset.monacoContentKey;
+            const host = element.querySelector(".monaco-source-host");
+            if (host) {
+                host.hidden = true;
+            }
+
+            const fallback = element.querySelector(".monaco-source-fallback");
+            if (fallback) {
+                fallback.hidden = false;
+            }
+        });
+    }
+
+    function initializeAll() {
+        document.querySelectorAll("[data-monaco-source]").forEach(initializeElement);
+    }
+
+    function scheduleInitializeAll() {
+        window.clearTimeout(initializeTimer);
+        initializeTimer = window.setTimeout(initializeAll, 40);
+    }
+
+    window.codexUiSourceEditor = {
+        setSource,
+        initializeAll,
+        scheduleInitializeAll
+    };
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", scheduleInitializeAll);
+    } else {
+        scheduleInitializeAll();
+    }
+}());

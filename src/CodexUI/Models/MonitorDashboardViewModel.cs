@@ -5,14 +5,18 @@ public sealed record MonitorDashboardViewModel(
     string EnvironmentLabel,
     string WatchedSolutionState,
     string WatchedSolutionPath,
+    McpServerViewModel McpServer,
+    WorkspaceStatusViewModel Workspace,
     IReadOnlyList<DashboardStatusCard> Cards,
     IReadOnlyList<string> PendingSurfaces)
 {
     public static MonitorDashboardViewModel Empty { get; } = new(
-        "Monitor Dashboard",
+        "Coding Services",
         "Shell",
         "Not connected",
         "CodingServices engine adapters will provide this later.",
+        McpServerViewModel.NotConnected,
+        WorkspaceStatusViewModel.Empty,
         [],
         []);
 }

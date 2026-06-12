@@ -32,13 +32,13 @@ internal static class Program
             catch (TimeoutException)
             {
                 Console.Error.WriteLine($"AICodingServices MCP proxy hub did not accept pipe '{pipeName}' within {ProxyHubConnectTimeoutMilliseconds / 1000} seconds.");
-                Console.Error.WriteLine("Start or restart AICodingServices.exe, then restart the client/test MCP session.");
+                Console.Error.WriteLine("Start or restart CodexUI, then restart the client/test MCP session.");
                 return 10;
             }
             catch (IOException ex)
             {
                 Console.Error.WriteLine($"Unable to connect to AICodingServices MCP proxy hub pipe '{pipeName}': {ex.Message}");
-                Console.Error.WriteLine("Start AICodingServices.exe and restart the client/test MCP session.");
+                Console.Error.WriteLine("Start CodexUI and restart the client/test MCP session.");
                 return 11;
             }
 
@@ -66,7 +66,7 @@ internal static class Program
 
             if (ReferenceEquals(completed, outputPump))
             {
-                Console.Error.WriteLine("AICodingServices MCP stdio bridge disconnected because the WinForms proxy hub closed the server stream.");
+                Console.Error.WriteLine("AICodingServices MCP stdio bridge disconnected because the CodexUI proxy hub closed the server stream.");
             }
 
             return 0;
@@ -89,8 +89,8 @@ internal static class Program
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("AICodingServices.McpStdioBridge [--server monitor] [--repo-root <path>] [--config <path>] [--server-dll <path>]");
-        Console.Error.WriteLine("AICodingServices.McpStdioBridge connects MCP stdio to the WinForms-owned AICodingServices MCP proxy hub.");
+        Console.Error.WriteLine("AICodingServices.McpStdioBridge [--server aicodingservices] [--repo-root <path>] [--config <path>] [--server-dll <path>]");
+        Console.Error.WriteLine("AICodingServices.McpStdioBridge connects MCP stdio to the CodexUI-owned AICodingServices MCP proxy hub.");
     }
 
     private sealed record BridgeOptions(
@@ -102,7 +102,7 @@ internal static class Program
     {
         public static BridgeOptions Parse(string[] args)
         {
-            string server = "monitor";
+            string server = "aicodingservices";
             string repositoryRoot = Directory.GetCurrentDirectory();
             string? settingsPath = null;
             string? serverDll = null;

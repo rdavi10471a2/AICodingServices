@@ -11,6 +11,8 @@ namespace AICodingServices.McpHub;
 
 public sealed class McpProxyHubService : IDisposable
 {
+    public const string ServerName = "aicodingservices";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -98,9 +100,9 @@ public sealed class McpProxyHubService : IDisposable
                 }
 
                 HubHandshake handshake = HubHandshake.Parse(handshakeLine);
-                if (!handshake.Server.Equals("monitor", StringComparison.OrdinalIgnoreCase))
+                if (!handshake.Server.Equals(ServerName, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException($"Unknown AICodingServices MCP proxy server '{handshake.Server}'. Expected 'monitor'.");
+                    throw new InvalidOperationException($"Unknown AICodingServices MCP proxy server '{handshake.Server}'. Expected '{ServerName}'.");
                 }
 
                 string sessionId = Guid.NewGuid().ToString("N");
@@ -411,7 +413,7 @@ public sealed class McpProxyHubService : IDisposable
             JsonObject obj = JsonNode.Parse(line)?.AsObject()
                 ?? throw new InvalidOperationException("Invalid MCP proxy hub handshake.");
             return new HubHandshake(
-                obj["server"]?.GetValue<string>() ?? "monitor",
+                obj["server"]?.GetValue<string>() ?? ServerName,
                 obj["settingsPath"]?.GetValue<string>(),
                 obj["serverDll"]?.GetValue<string>());
         }

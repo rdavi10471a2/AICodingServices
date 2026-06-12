@@ -1,0 +1,98 @@
+@if (Node.IsFolder || Node.Children.Count > 0)
+{
+    <details class="tree-folder" open>
+        <summary>
+            <span class="tree-folder-label" title="@Node.Name">
+                <span class="tree-twist" aria-hidden="true">&gt;</span>
+                <span class="tree-icon" aria-hidden="true">@GetNodeIcon(Node)</span>
+                @if (Node.RelativePath is null)
+                {
+                    <span class="tree-label">@Node.Name</span>
+                }
+                else
+                {
+                    <a class="tree-label tree-symbol-link @(Node.IsSelected ? "selected" : null)"
+                       href="@BuildFileHref(Node.RelativePath, Node.Line)#line-@Node.Line"
+                       title="@Node.Name"
+                       @onclick:stopPropagation="true">@Node.Name</a>
+                }
+            </span>
+        </summary>
+        <div class="tree-children">
+            @foreach (SourceTreeNodeViewModel child in Node.Children)
+            {
+                <SourceTreeNode Node="@child" />
+            }
+        </div>
+    </details>
+}
+else if (Node.RelativePath is not null)
+{
+    <div class="tree-file-row">
+        <a class="source-file-link @(Node.IsSelected ? "selected" : null)"
+           href="@BuildFileHref(Node.RelativePath, Node.Line)"
+           title="@Node.RelativePath"
+           @onclick:stopPropagation="true">
+            <span class="file-icon" aria-hidden="true">@GetFileIcon(Node.Extension, Node.Kind)</span>
+            <span class="file-name">@Node.Name</span>
+        </a>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public required SourceTreeNodeViewModel Node { get; set; }
+
+    private static string BuildFileHref(string relativePath, int line)
+    {
+        return $"/watched-solution?path={Uri.EscapeDataString(relativePath)}&line={line}";
+    }
+
+    private static string GetFolderIcon(string kind)
+    {
+        return kind switch
+        {
+            "project" => "PR",
+            "folder" => "[]",
+            "type" => "T",
+            "group" => "::",
+            _ => "[]"
+        };
+    }
+
+    private static string GetNodeIcon(SourceTreeNodeViewModel node)
+    {
+        if (node.IsFolder || node.Kind == "type" || node.Kind == "group")
+        {
+            return GetFolderIcon(node.Kind);
+        }
+
+        return GetFileIcon(node.Extension, node.Kind);
+    }
+
+    private static string GetFileIcon(string extension, string kind)
+    {
+        if (kind == "symbol")
+        {
+            return "S";
+        }
+
+        return extension.ToUpperInvariant() switch
+        {
+            "CS" => "C#",
+            "RAZOR" => "RZ",
+            "CSHTML" => "RZ",
+            "JSON" => "{}",
+            "XML" => "<>",
+            "XAML" => "XM",
+            "CSS" => "#",
+            "JS" => "JS",
+            "TS" => "TS",
+            "MD" => "MD",
+            "CSPROJ" => "MS",
+            "SLN" => "SL",
+            "SLNX" => "SL",
+            _ => "TXT"
+        };
+    }
+}

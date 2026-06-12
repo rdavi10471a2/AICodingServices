@@ -1,0 +1,114 @@
+@page "/watched-solution"
+@inject IWatchedSolutionViewService WatchedSolutionViewService
+@inject IWorkspaceStatusService WorkspaceStatusService
+@rendermode InteractiveServer
+
+<PageTitle>Watched Solution</PageTitle>
+
+<section class="source-page">
+    <header class="page-header">
+        <div>
+            <p class="eyebrow">Read-Only Source</p>
+            <h1>Watched Solution</h1>
+            <p class="page-subtitle">@model.WatchedSolutionPath</p>
+        </div>
+        <div class="header-actions">
+            @if (model.Workspace.RebuildRequired || model.Files.Count == 0)
+            {
+                <button class="primary-action" type="button" @onclick="RebuildIndexAsync" disabled="@isRebuildingIndex">
+                    @(isRebuildingIndex ? "Rebuilding index..." : "Rebuild Index")
+                </button>
+            }
+            <div class="status-pill">@model.Status</div>
+        </div>
+    </header>
+
+    <div class="source-layout">
+        <aside class="source-tree" aria-label="Watched source tree">
+            <div class="panel-heading">
+                <h2>Tree</h2>
+                <span>@model.Files.Count</span>
+            </div>
+            <nav class="source-tree-list">
+                @foreach (SourceTreeNodeViewModel node in model.Tree)
+                {
+                    <SourceTreeNode Node="@node" />
+                }
+            </nav>
+        </aside>
+
+        <section class="source-view">
+            @if (model.SelectedFile is null)
+            {
+                <div class="empty-state">
+                    <h2>No File Selected</h2>
+                    <p>Select a file to inspect source.</p>
+                </div>
+            }
+            else
+            {
+                <div class="source-toolbar">
+                    <div>
+                        <h2>@model.SelectedFile.RelativePath</h2>
+                        <span>@model.SelectedFile.FullPath</span>
+                    </div>
+                    <strong>@model.SelectedFile.Language</strong>
+                </div>
+
+                <MonacoSourceEditor File="@model.SelectedFile" />
+
+                <div class="reference-grid">
+                    <section class="reference-panel">
+                        <div class="panel-heading">
+                            <h2>Uses</h2>
+                            <span>pending index adapter</span>
+                        </div>
+                        <p>Read-only source browsing is wired. Symbol reference data will come from the AICodingServices index adapter.</p>
+                    </section>
+                    <section class="reference-panel">
+                        <div class="panel-heading">
+                            <h2>Used By</h2>
+                            <span>pending index adapter</span>
+                        </div>
+                        <p>Incoming references will be shown here after the UI consumes the MCP/index surface.</p>
+                    </section>
+                </div>
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "path")]
+    public string? Path { get; set; }
+
+    [SupplyParameterFromQuery(Name = "line")]
+    public int? Line { get; set; }
+
+    private WatchedSolutionViewModel model = WatchedSolutionViewModel.Empty;
+    private bool isRebuildingIndex;
+
+    protected override void OnParametersSet()
+    {
+        model = WatchedSolutionViewService.GetView(Path, Line);
+    }
+
+    private async Task RebuildIndexAsync()
+    {
+        if (isRebuildingIndex)
+        {
+            return;
+        }
+
+        isRebuildingIndex = true;
+        try
+        {
+            await WorkspaceStatusService.RebuildIndexAsync(CancellationToken.None);
+            model = WatchedSolutionViewService.GetView(Path, Line);
+        }
+        finally
+        {
+            isRebuildingIndex = false;
+        }
+    }
+}
