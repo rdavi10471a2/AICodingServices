@@ -7,7 +7,7 @@
         "--repo-root",
         ".",
         "--config",
-        ".\\config\\appsettings.json"
+        ".\\src\\CodexUI\\appsettings.json"
       ],
       "env": {}
     }

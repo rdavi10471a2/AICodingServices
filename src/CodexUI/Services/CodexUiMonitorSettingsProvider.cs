@@ -1,14 +1,17 @@
 using AICodingServices.Core;
+using Microsoft.Extensions.Hosting;
 
 namespace CodexUI.Services;
 
 public sealed class CodexUiMonitorSettingsProvider : ICodexUiMonitorSettingsProvider
 {
     private readonly IConfiguration configuration;
+    private readonly IHostEnvironment environment;
 
-    public CodexUiMonitorSettingsProvider(IConfiguration configuration)
+    public CodexUiMonitorSettingsProvider(IConfiguration configuration, IHostEnvironment environment)
     {
         this.configuration = configuration;
+        this.environment = environment;
     }
 
     public MonitorSettings GetSettings()
@@ -23,6 +26,11 @@ public sealed class CodexUiMonitorSettingsProvider : ICodexUiMonitorSettingsProv
             ResolvePath(watchedSolutionPath, Directory.GetCurrentDirectory()),
             ResolvePath(runtimeRoot, repositoryRoot),
             winMergeCandidatePaths);
+    }
+
+    public string GetSettingsPath()
+    {
+        return Path.Combine(environment.ContentRootPath, "appsettings.json");
     }
 
     private IReadOnlyList<string> LoadWinMergeCandidatePaths()

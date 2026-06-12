@@ -8,7 +8,15 @@ public static class Program
 {
     public static void Main(string[] args)
     {
-        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+        string contentRoot = ResolveContentRoot();
+        WebApplicationOptions options = new()
+        {
+            Args = args,
+            ContentRootPath = contentRoot,
+            WebRootPath = Path.Combine(contentRoot, "wwwroot")
+        };
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(options);
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
@@ -40,5 +48,34 @@ public static class Program
             .AddInteractiveServerRenderMode();
 
         app.Run();
+    }
+
+    private static string ResolveContentRoot()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        DirectoryInfo? current = new(baseDirectory);
+        while (current is not null)
+        {
+            if (IsCodexUiProjectRoot(current.FullName))
+            {
+                return current.FullName;
+            }
+
+            string srcCandidate = Path.Combine(current.FullName, "src", "CodexUI");
+            if (IsCodexUiProjectRoot(srcCandidate))
+            {
+                return srcCandidate;
+            }
+
+            current = current.Parent;
+        }
+
+        return baseDirectory;
+    }
+
+    private static bool IsCodexUiProjectRoot(string candidatePath)
+    {
+        return File.Exists(Path.Combine(candidatePath, "CodexUI.csproj"))
+            && Directory.Exists(Path.Combine(candidatePath, "wwwroot"));
     }
 }

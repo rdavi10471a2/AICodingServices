@@ -14,6 +14,8 @@ public sealed class MonitorLogPipeClientLogger : IMonitorLogger
     private readonly string pipeName;
     private readonly IMonitorLogger fallbackLogger;
     private readonly TimeSpan connectTimeout;
+    private readonly object fallbackStateGate = new();
+    private DateTimeOffset lastUnavailableNoticeUtc = DateTimeOffset.MinValue;
 
     static MonitorLogPipeClientLogger()
     {
@@ -79,13 +81,27 @@ public sealed class MonitorLogPipeClientLogger : IMonitorLogger
         fallbackProperties["hubRunning"] = "false";
         fallbackProperties["logDelivery"] = "direct-file-fallback";
         fallbackProperties["pipeName"] = pipeName;
+        bool shouldWriteUnavailable;
+        lock (fallbackStateGate)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            shouldWriteUnavailable = now - lastUnavailableNoticeUtc >= TimeSpan.FromSeconds(30);
+            if (shouldWriteUnavailable)
+            {
+                lastUnavailableNoticeUtc = now;
+            }
+        }
 
-        fallbackLogger.Write(
-            MonitorLogLevel.Warning,
-            source,
-            "adapter.hub.unavailable",
-            "WinForms hub log pipe was unavailable; adapter wrote directly to the runtime log.",
-            fallbackProperties);
+        if (shouldWriteUnavailable)
+        {
+            fallbackLogger.Write(
+                MonitorLogLevel.Warning,
+                source,
+                "adapter.hub.unavailable",
+                "WinForms hub log pipe was unavailable; adapter wrote directly to the runtime log.",
+                fallbackProperties);
+        }
+
         fallbackLogger.Write(level, source, eventName, message, fallbackProperties);
     }
 }

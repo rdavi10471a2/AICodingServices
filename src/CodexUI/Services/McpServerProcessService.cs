@@ -29,8 +29,9 @@ public sealed class McpServerProcessService : IHostedService, IMcpServerProcessS
             }
 
             MonitorSettings settings = settingsProvider.GetSettings();
+            string settingsPath = settingsProvider.GetSettingsPath();
             JsonLinesMonitorLogger logger = new(MonitorLogPaths.GetDefaultLogPath(settings));
-            hub = new McpProxyHubService(settings, logger);
+            hub = new McpProxyHubService(settings, logger, settingsPath);
             pipeName = hub.PipeName;
             startedAtUtc = DateTimeOffset.UtcNow;
             detail = $"CodexUI owns the AICodingServices MCP hub. Bridge clients should connect with server '{McpProxyHubService.ServerName}'.";
@@ -96,5 +97,4 @@ public sealed class McpServerProcessService : IHostedService, IMcpServerProcessS
 
         hubToDispose.Dispose();
     }
-
 }

@@ -335,6 +335,11 @@ public sealed class PostAcceptIndexRefreshService
     {
         return (phase, durationMs, properties) =>
         {
+            if (!PostAcceptIndexRefreshTelemetry.ShouldLogPhase(properties))
+            {
+                return;
+            }
+
             Dictionary<string, string> logProperties = new(StringComparer.Ordinal)
             {
                 ["stagedRecordId"] = record.StagedRecordId,

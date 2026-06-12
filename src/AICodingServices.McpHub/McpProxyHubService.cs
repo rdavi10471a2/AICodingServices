@@ -20,14 +20,16 @@ public sealed class McpProxyHubService : IDisposable
 
     private readonly MonitorSettings settings;
     private readonly IMonitorLogger logger;
+    private readonly string settingsPath;
     private readonly string pipeName;
     private readonly CancellationTokenSource shutdown = new();
     private readonly Task acceptLoop;
 
-    public McpProxyHubService(MonitorSettings settings, IMonitorLogger logger)
+    public McpProxyHubService(MonitorSettings settings, IMonitorLogger logger, string settingsPath)
     {
         this.settings = settings;
         this.logger = logger;
+        this.settingsPath = Path.GetFullPath(settingsPath);
         pipeName = MonitorMcpProxyPipeNames.GetDefaultPipeName(settings);
         acceptLoop = Task.Run(() => AcceptLoopAsync(shutdown.Token));
     }
@@ -178,12 +180,15 @@ public sealed class McpProxyHubService : IDisposable
                     Encoding.UTF8.GetByteCount(line));
             }
 
-            logger.Write(
-                MonitorLogLevel.Information,
-                "AICodingServices.McpProxyHub",
-                "adapter.mcp.request.started",
-                "MCP proxy hub forwarded a request to AICodingServices server.",
-                BuildRequestProperties(sessionId, metadata, line));
+            if (McpTrafficLogPolicy.ShouldLogTraffic(metadata.Method, metadata.ToolName))
+            {
+                logger.Write(
+                    MonitorLogLevel.Information,
+                    "AICodingServices.McpProxyHub",
+                    "adapter.mcp.request.started",
+                    "MCP proxy hub forwarded a request to AICodingServices server.",
+                    BuildRequestProperties(sessionId, metadata, line));
+            }
 
             await child.StandardInput.WriteLineAsync(line);
             await child.StandardInput.FlushAsync(cancellationToken);
@@ -214,12 +219,15 @@ public sealed class McpProxyHubService : IDisposable
                 };
             }
 
-            logger.Write(
-                MonitorLogLevel.Information,
-                "AICodingServices.McpProxyHub",
-                "adapter.mcp.request.completed",
-                "MCP proxy hub received a response from AICodingServices server.",
-                BuildResponseProperties(sessionId, metadata, request, line, durationMs));
+            if (McpTrafficLogPolicy.ShouldLogTraffic(metadata.Method, metadata.ToolName))
+            {
+                logger.Write(
+                    MonitorLogLevel.Information,
+                    "AICodingServices.McpProxyHub",
+                    "adapter.mcp.request.completed",
+                    "MCP proxy hub received a response from AICodingServices server.",
+                    BuildResponseProperties(sessionId, metadata, request, line, durationMs));
+            }
 
             await clientWriter.WriteLineAsync(line);
         }
@@ -246,8 +254,7 @@ public sealed class McpProxyHubService : IDisposable
     {
         Dictionary<string, string> properties = BaseProperties(sessionId, metadata);
         properties["requestBytes"] = Encoding.UTF8.GetByteCount(line).ToString();
-        properties["contentTextPreview"] = Truncate(metadata.ArgumentsText ?? line, 500);
-        properties["contentText"] = metadata.ArgumentsText ?? line;
+        McpTrafficLogPolicy.AddPayloadProperties(properties, "contentText", metadata.ArgumentsText ?? line);
         return properties;
     }
 
@@ -262,8 +269,7 @@ public sealed class McpProxyHubService : IDisposable
         Dictionary<string, string> properties = BaseProperties(sessionId, metadata);
         properties["isError"] = metadata.IsError.ToString().ToLowerInvariant();
         properties["messageBytes"] = Encoding.UTF8.GetByteCount(line).ToString();
-        properties["contentTextPreview"] = Truncate(responseText, 500);
-        properties["contentText"] = responseText;
+        McpTrafficLogPolicy.AddPayloadProperties(properties, "contentText", responseText);
         if (durationMs is not null)
         {
             properties["durationMs"] = durationMs.Value.ToString();
@@ -290,10 +296,7 @@ public sealed class McpProxyHubService : IDisposable
             properties["toolName"] = metadata.ToolName;
         }
 
-        if (!string.IsNullOrWhiteSpace(metadata.ArgumentsText))
-        {
-            properties["arguments"] = metadata.ArgumentsText;
-        }
+        McpTrafficLogPolicy.AddPayloadProperties(properties, "arguments", metadata.ArgumentsText);
 
         return properties;
     }
@@ -336,9 +339,7 @@ public sealed class McpProxyHubService : IDisposable
         startInfo.ArgumentList.Add("--repo-root");
         startInfo.ArgumentList.Add(settings.RepositoryRoot);
         startInfo.ArgumentList.Add("--config");
-        startInfo.ArgumentList.Add(string.IsNullOrWhiteSpace(handshake.SettingsPath)
-            ? Path.Combine(settings.RepositoryRoot, "config", "appsettings.json")
-            : handshake.SettingsPath);
+        startInfo.ArgumentList.Add(settingsPath);
 
         return Process.Start(startInfo)
             ?? throw new InvalidOperationException("Unable to start AICodingServices MCP server.");
