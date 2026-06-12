@@ -9,6 +9,7 @@ namespace AICodingServices.McpStdioBridge;
 internal static class Program
 {
     private const int ProxyHubConnectTimeoutMilliseconds = 60000;
+    private static readonly TimeSpan PendingResponseDrainTimeout = TimeSpan.FromSeconds(60);
 
     public static async Task<int> Main(string[] args)
     {
@@ -24,52 +25,65 @@ internal static class Program
             MonitorSettings settings = MonitorSettingsLoader.Load(options.RepositoryRoot, options.SettingsPath);
             string pipeName = MonitorMcpProxyPipeNames.GetDefaultPipeName(settings);
 
-            using NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            try
+            using (NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
             {
-                await pipe.ConnectAsync(ProxyHubConnectTimeoutMilliseconds);
-            }
-            catch (TimeoutException)
-            {
-                Console.Error.WriteLine($"AICodingServices MCP proxy hub did not accept pipe '{pipeName}' within {ProxyHubConnectTimeoutMilliseconds / 1000} seconds.");
-                Console.Error.WriteLine("Start or restart CodexUI, then restart the client/test MCP session.");
-                return 10;
-            }
-            catch (IOException ex)
-            {
-                Console.Error.WriteLine($"Unable to connect to AICodingServices MCP proxy hub pipe '{pipeName}': {ex.Message}");
-                Console.Error.WriteLine("Start CodexUI and restart the client/test MCP session.");
-                return 11;
-            }
+                try
+                {
+                    await pipe.ConnectAsync(ProxyHubConnectTimeoutMilliseconds);
+                }
+                catch (TimeoutException)
+                {
+                    Console.Error.WriteLine($"AICodingServices MCP proxy hub did not accept pipe '{pipeName}' within {ProxyHubConnectTimeoutMilliseconds / 1000} seconds.");
+                    Console.Error.WriteLine("Start or restart CodexUI, then restart the client/test MCP session.");
+                    return 10;
+                }
+                catch (IOException ex)
+                {
+                    Console.Error.WriteLine($"Unable to connect to AICodingServices MCP proxy hub pipe '{pipeName}': {ex.Message}");
+                    Console.Error.WriteLine("Start CodexUI and restart the client/test MCP session.");
+                    return 11;
+                }
 
-            using StreamReader pipeReader = new(pipe, Encoding.UTF8, leaveOpen: true);
-            await using StreamWriter pipeWriter = new(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
-            using StreamReader stdin = new(Console.OpenStandardInput(), Encoding.UTF8);
-            await using StreamWriter stdout = new(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+                using (StreamReader pipeReader = new(pipe, Encoding.UTF8, leaveOpen: true))
+                {
+                    using (StreamWriter pipeWriter = new(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true })
+                    {
+                        Stream stdin = Console.OpenStandardInput();
+                        Stream stdout = Console.OpenStandardOutput();
+                        StdioProtocolState protocolState = new();
 
-            await pipeWriter.WriteLineAsync(JsonSerializer.Serialize(new
-            {
-                server = options.Server,
-                settingsPath = options.SettingsPath,
-                serverDll = options.ServerDll
-            }));
+                        await pipeWriter.WriteLineAsync(JsonSerializer.Serialize(new
+                        {
+                            server = options.Server,
+                            settingsPath = options.SettingsPath,
+                            serverDll = options.ServerDll
+                        }));
 
-            Task inputPump = PumpAsync(stdin, pipeWriter);
-            Task outputPump = PumpAsync(pipeReader, stdout);
-            Task completed = await Task.WhenAny(inputPump, outputPump);
-            if (completed.IsFaulted)
-            {
-                Exception ex = completed.Exception?.GetBaseException() ?? new InvalidOperationException("Unknown bridge pump failure.");
-                Console.Error.WriteLine($"AICodingServices MCP stdio bridge disconnected with an error: {ex.Message}");
-                return 20;
+                        Task inputPump = PumpClientToHubAsync(stdin, pipeWriter, protocolState);
+                        Task outputPump = PumpHubToClientAsync(pipeReader, stdout, protocolState);
+                        Task completed = await Task.WhenAny(inputPump, outputPump);
+                        if (completed.IsFaulted)
+                        {
+                            Exception ex = completed.Exception?.GetBaseException() ?? new InvalidOperationException("Unknown bridge pump failure.");
+                            Console.Error.WriteLine($"AICodingServices MCP stdio bridge disconnected with an error: {ex.Message}");
+                            return 20;
+                        }
+
+                        if (ReferenceEquals(completed, inputPump))
+                        {
+                            await protocolState.WaitForPendingResponsesAsync(PendingResponseDrainTimeout);
+                            return 0;
+                        }
+
+                        if (ReferenceEquals(completed, outputPump))
+                        {
+                            Console.Error.WriteLine("AICodingServices MCP stdio bridge disconnected because the CodexUI proxy hub closed the server stream.");
+                        }
+
+                        return 0;
+                    }
+                }
             }
-
-            if (ReferenceEquals(completed, outputPump))
-            {
-                Console.Error.WriteLine("AICodingServices MCP stdio bridge disconnected because the CodexUI proxy hub closed the server stream.");
-            }
-
-            return 0;
         }
         catch (Exception ex)
         {
@@ -78,13 +92,42 @@ internal static class Program
         }
     }
 
-    private static async Task PumpAsync(TextReader reader, TextWriter writer)
+    private static async Task PumpClientToHubAsync(Stream input, TextWriter hubWriter, StdioProtocolState protocolState)
     {
-        while (await reader.ReadLineAsync() is { } line)
+        StdioMessageReader reader = new(input);
+        while (await reader.ReadNextAsync() is { } message)
         {
-            await writer.WriteLineAsync(line);
-            await writer.FlushAsync();
+            protocolState.ObserveInputMode(message.Mode);
+            protocolState.ObserveClientMessage(message.Json);
+            await hubWriter.WriteLineAsync(message.Json);
+            await hubWriter.FlushAsync();
         }
+    }
+
+    private static async Task PumpHubToClientAsync(TextReader hubReader, Stream output, StdioProtocolState protocolState)
+    {
+        while (await hubReader.ReadLineAsync() is { } line)
+        {
+            protocolState.ObserveHubMessage(line);
+            if (protocolState.UseFramedOutput)
+            {
+                await WriteFramedMessageAsync(output, line);
+            }
+            else
+            {
+                await WriteLineMessageAsync(output, line);
+            }
+        }
+    }
+
+    private static async Task WriteFramedMessageAsync(Stream output, string json)
+    {
+        await StdioMessageWriter.WriteFramedAsync(output, json);
+    }
+
+    private static async Task WriteLineMessageAsync(Stream output, string json)
+    {
+        await StdioMessageWriter.WriteLineAsync(output, json);
     }
 
     private static void PrintUsage()

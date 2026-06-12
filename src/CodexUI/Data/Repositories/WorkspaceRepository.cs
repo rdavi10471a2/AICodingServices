@@ -18,24 +18,31 @@ public sealed class WorkspaceRepository
         Directory.CreateDirectory(Path.Combine(workspaceRoot, "reviews"));
         Directory.CreateDirectory(Path.Combine(workspaceRoot, "logs"));
 
+        bool indexDatabaseExists = File.Exists(databasePath);
         SolutionIndexDatabase database = new(databasePath);
         database.EnsureCreated();
         SolutionIndexCounts counts = new SolutionIndexProbe(database).GetCounts();
         bool rebuildRequired = database.IsFullRebuildRequired()
+            || !indexDatabaseExists
             || counts.Projects == 0
             || counts.Documents == 0;
+        DateTimeOffset? lastBuildAt = indexDatabaseExists
+            ? new DateTimeOffset(File.GetLastWriteTime(databasePath))
+            : null;
 
         return new WorkspaceStatusViewModel(
             rebuildRequired ? "Rebuild needed" : "Ready",
             workspaceRoot,
             databasePath,
             Directory.Exists(workspaceRoot),
-            File.Exists(databasePath),
+            indexDatabaseExists,
             rebuildRequired,
             counts.Projects,
             counts.Documents,
             counts.Symbols,
-            counts.References);
+            counts.References,
+            counts.CallSites,
+            lastBuildAt);
     }
 
     public async Task RebuildIndexAsync(MonitorSettings settings, CancellationToken cancellationToken)

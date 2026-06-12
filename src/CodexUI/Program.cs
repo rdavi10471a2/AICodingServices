@@ -1,6 +1,8 @@
 using CodexUI.Components;
 using CodexUI.Data.Repositories;
 using CodexUI.Services;
+using Microsoft.AspNetCore.Hosting.StaticWebAssets;
+using Radzen;
 
 namespace CodexUI;
 
@@ -17,9 +19,11 @@ public static class Program
         };
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(options);
+        StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
 
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
+        builder.Services.AddRadzenComponents();
         builder.Services.AddSingleton<McpServerProcessService>();
         builder.Services.AddSingleton<IMcpServerProcessService>(
             services => services.GetRequiredService<McpServerProcessService>());
@@ -29,8 +33,10 @@ public static class Program
         builder.Services.AddSingleton<WatchedSolutionIndexRepository>();
         builder.Services.AddSingleton<WorkspaceRepository>();
         builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();
-        builder.Services.AddSingleton<IDashboardViewService, PlaceholderDashboardViewService>();
+        builder.Services.AddSingleton<ICodexUsageSummaryService, CodexUsageSummaryService>();
+        builder.Services.AddSingleton<IDashboardViewService, CodingServicesDashboardViewService>();
         builder.Services.AddSingleton<IWatchedSolutionViewService, WatchedSolutionViewService>();
+        builder.Services.AddSingleton<SourceNavigationState>();
 
         WebApplication app = builder.Build();
 
@@ -44,6 +50,7 @@ public static class Program
         app.UseStaticFiles();
         app.UseAntiforgery();
 
+        app.MapStaticAssets();
         app.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
 

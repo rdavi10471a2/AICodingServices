@@ -5,12 +5,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <RadzenTheme Theme="material" />
     <link rel="stylesheet" href="css/app.css?v=20260611-source-webview-1" />
     <HeadOutlet />
 </head>
 
 <body>
     <Routes />
+    <script src="_content/Radzen.Blazor/Radzen.Blazor.js?v=@(typeof(Radzen.Colors).Assembly.GetName().Version)"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 

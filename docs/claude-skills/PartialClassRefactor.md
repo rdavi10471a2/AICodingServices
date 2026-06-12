@@ -9,7 +9,7 @@ Use when a human-guided refactor intentionally moves related members into compan
 - Do not smuggle type declaration modifier changes into unrelated symbol edits.
 - Add new members to the companion partial through normal `add_symbol` staging.
 - Preserve the baseline option: a same-file dictionary/constant block may be better for small changes.
-- For Razor components with inline `@code`, do not assume CodingServices has a dedicated split tool. Stage the `.razor` markup and `.razor.cs` partial-class companion together in one monitor session with explicit `submit_file`/text edits, then let pre-merge validation prove the result. Brand-new Razor components should be authored directly in two-file form.
+- For Razor components with inline `@code`, do not assume CodingServices has a dedicated split tool. Stage the `.razor` markup, `.razor.cs` partial-class companion, and `.razor.css` scoped stylesheet together in one monitor session with explicit `submit_file`/text edits, then let pre-merge validation prove the result. Brand-new Razor components should be authored directly in three-file form.
 
 ## Usual Flow
 

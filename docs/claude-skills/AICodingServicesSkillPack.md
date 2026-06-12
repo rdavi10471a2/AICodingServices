@@ -36,11 +36,19 @@ get_staging_guide
 - `SystemMonitorStaging.md`: stage watched-source changes safely.
 - `SessionOverlayValidation.md`: validate coupled staged files together.
 - `ReviewQueueAndGates.md`: WinMerge, pre-merge validation gate, queue stop/unblock.
+- `HarnessVerification.md`: focused done-checks for CodexUI, MCP, index, workflow, browser, and watched-source changes.
+- `CodingServicesSelfReview.md`: default skill-only WinMerge proposal loop for CodingServices bugs, behavior changes, UI rewrites, and workflow/index/MCP/runtime changes.
 - `FormattingOracle.md`: placement, trivia, generated-file layout.
 - `AsyncPropagation.md`: async/signature propagation through callers/contracts.
 - `PartialClassRefactor.md`: human-guided companion partial extraction.
 - `SkillProposalWinMergeReview.md`: review skill-card and agent-instruction proposals through `runtime/skill-proposals/` plus WinMerge.
+- `SkillGovernance.md`: keep skill cards routed, consistent, concise, and preference-accurate.
 - `TroubleshootingDashboard.md`: verify live CodexUI/CodingServices traffic and diagnose drift.
+- `ReadableCSharpAuthoring.md`: C# style, naming, and architecture-readable defaults.
+- `BlazorRadzenAuthoring.md`: Blazor/Radzen UI as adapters over models, services, and server-backed state.
+- `WinFormsAuthoring.md`: code-first WinForms, designer discipline, layout timing, and model-backed screens.
+- `SQLiteDapperAuthoring.md`: Dapper-default repository guidance plus SQLite opt-in local workflow persistence rules and gotchas.
+- `RepositoryAuthoring.md`: repository boundaries, query names, transaction ownership, and persistence architecture.
 
 These cards live in CodingServices so the workflow stays familiar while the repo itself owns the watched-source edit host behavior.
 

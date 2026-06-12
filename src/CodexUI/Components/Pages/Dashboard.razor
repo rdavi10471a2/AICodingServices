@@ -1,142 +1,195 @@
 @page "/"
-@inject IDashboardViewService DashboardViewService
-@inject IWorkspaceStatusService WorkspaceStatusService
 @rendermode InteractiveServer
 
 <PageTitle>Coding Services</PageTitle>
 
 <section class="overview-page">
-    <header class="overview-hero">
-        <div>
-            <p class="eyebrow">Coding Services</p>
-            <h1>@model.Title</h1>
-            <p class="target-path">@model.WatchedSolutionPath</p>
-        </div>
-        <div class="header-actions">
-            <button class="primary-action" type="button" @onclick="RebuildIndexAsync" disabled="@isRebuildingIndex">
-                @(isRebuildingIndex ? "Rebuilding index..." : "Rebuild Index")
-            </button>
-            <div class="status-pill">@model.Workspace.State</div>
-        </div>
-    </header>
+    <RadzenStack Gap="1rem">
+        <RadzenCard class="overview-hero">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem" class="solution-title-row">
+                    <RadzenText TextStyle="TextStyle.H1" class="overview-title">@model.Title</RadzenText>
+                    <RadzenStack Gap="0.2rem" class="observed-solution">
+                        <span class="observing-label">(observing)</span>
+                        <RadzenText class="target-path">@model.WatchedSolutionPath</RadzenText>
+                    </RadzenStack>
+                </RadzenStack>
+                <RadzenBadge BadgeStyle="@McpBadgeStyle" Text="@McpStatusLabel" class="status-badge" />
+            </RadzenStack>
+        </RadzenCard>
 
-    <section class="health-row" aria-label="Coding services status">
-        <div>
-            <span>Projects</span>
-            <strong>@model.Workspace.ProjectCount</strong>
-        </div>
-        <div>
-            <span>Documents</span>
-            <strong>@model.Workspace.DocumentCount</strong>
-        </div>
-        <div>
-            <span>Symbols</span>
-            <strong>@model.Workspace.SymbolCount</strong>
-        </div>
-        <div>
-            <span>References</span>
-            <strong>@model.Workspace.ReferenceCount</strong>
-        </div>
-        <div>
-            <span>MCP Hub</span>
-            <strong>@model.McpServer.State</strong>
-        </div>
-    </section>
+        <RadzenCard class="index-panel">
+            <RadzenStack Gap="1rem">
+                <div class="index-header">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.H2" class="section-title">Solution Index Details</RadzenText>
+                    </div>
+                    <div class="index-actions">
+                        @if (model.Workspace.RebuildRequired)
+                        {
+                            <RadzenButton Text="@IndexActionLabel" ButtonStyle="ButtonStyle.Primary" Click="RebuildIndexAsync" Disabled="@isRebuildingIndex" />
+                        }
+                        else
+                        {
+                            <RadzenBadge BadgeStyle="@IndexBadgeStyle" Text="@IndexStatusLabel" class="status-badge" />
+                        }
+                    </div>
+                </div>
 
-    <section class="operations-grid">
-        <article class="operation-panel">
-            <div class="panel-heading">
-                <h2>Index</h2>
-                <span>@model.Workspace.IndexLabel</span>
-            </div>
-            <dl class="detail-list compact-detail-list">
-                <div>
-                    <dt>Database</dt>
-                    <dd>@model.Workspace.IndexDatabasePath</dd>
-                </div>
-                <div>
-                    <dt>Workspace</dt>
-                    <dd>@model.Workspace.WorkspaceRoot</dd>
-                </div>
-            </dl>
-            @if (!string.IsNullOrWhiteSpace(rebuildMessage))
-            {
-                <p class="action-message">@rebuildMessage</p>
-            }
-        </article>
-
-        <article class="operation-panel">
-            <div class="panel-heading">
-                <h2>MCP Hub</h2>
-                <span class="@model.McpServer.StateCssClass">@model.McpServer.State</span>
-            </div>
-            <dl class="detail-list">
-                <div>
-                    <dt>Process</dt>
-                    <dd>@model.McpServer.ProcessLabel</dd>
-                </div>
-                <div>
-                    <dt>Transport</dt>
-                    <dd>@model.McpServer.Transport</dd>
-                </div>
-                <div>
-                    <dt>Started</dt>
-                    <dd>@model.McpServer.StartedLabel</dd>
-                </div>
-            </dl>
-            <p>@model.McpServer.Detail</p>
-        </article>
-
-        <article class="operation-panel workflow-panel">
-            <div class="panel-heading">
-                <h2>Workflow</h2>
-                <span>not connected</span>
-            </div>
-            <ul class="surface-list">
-                @foreach (string item in model.PendingSurfaces)
+                @if (model.Workspace.RebuildRequired)
                 {
-                    <li>@item</li>
+                    <RadzenAlert AlertStyle="AlertStyle.Warning" ShowIcon="true" Variant="Variant.Flat">
+                        @model.Workspace.IndexLabel
+                    </RadzenAlert>
                 }
-            </ul>
-        </article>
-    </section>
+
+                <div class="index-summary-grid">
+                    <div class="index-metric">
+                        <span>Projects</span>
+                        <strong>@model.Workspace.ProjectCount</strong>
+                    </div>
+                    <div class="index-metric">
+                        <span>Documents</span>
+                        <strong>@model.Workspace.DocumentCount</strong>
+                    </div>
+                    <div class="index-metric">
+                        <span>Symbols</span>
+                        <strong>@model.Workspace.SymbolCount.ToString("N0")</strong>
+                    </div>
+                    <div class="index-metric">
+                        <span>References</span>
+                        <strong>@model.Workspace.ReferenceCount.ToString("N0")</strong>
+                    </div>
+                    <div class="index-metric">
+                        <span>Call Sites</span>
+                        <strong>@model.Workspace.CallSiteCount.ToString("N0")</strong>
+                    </div>
+                </div>
+
+                <div class="index-detail-grid">
+                    <div class="detail-tile">
+                        <span>Diagnostics</span>
+                        <strong>0</strong>
+                    </div>
+                    <div class="detail-tile">
+                        <span>Stale Items</span>
+                        <strong>0</strong>
+                    </div>
+                    <div class="detail-tile detail-tile-wide">
+                        <span>Last Build</span>
+                        <strong>@model.Workspace.LastBuildLabel</strong>
+                    </div>
+                </div>
+            </RadzenStack>
+        </RadzenCard>
+
+        <RadzenCard class="usage-panel">
+            <RadzenStack Gap="1rem">
+                <div class="index-header">
+                    <div>
+                        <RadzenText TextStyle="TextStyle.H2" class="section-title">Codex Usage</RadzenText>
+                        <p class="panel-subtitle">Aggregate counters from local Codex logs</p>
+                    </div>
+                    <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@model.CodexUsage.State" class="status-badge" />
+                </div>
+
+                <div class="usage-balance-grid">
+                    <div class="usage-balance-card">
+                        <span>5 hour usage limit</span>
+                        <strong>@model.CodexUsage.FiveHourLabel</strong>
+                        <div class="usage-progress">
+                            <div style="@GetUsageProgressStyle(model.CodexUsage.FiveHourRemainingPercent)"></div>
+                        </div>
+                        <small>Resets @model.CodexUsage.FiveHourResetLabel</small>
+                    </div>
+                    <div class="usage-balance-card">
+                        <span>Weekly usage limit</span>
+                        <strong>@model.CodexUsage.WeeklyLabel</strong>
+                        <div class="usage-progress">
+                            <div style="@GetUsageProgressStyle(model.CodexUsage.WeeklyRemainingPercent)"></div>
+                        </div>
+                        <small>Resets @model.CodexUsage.WeeklyResetLabel</small>
+                    </div>
+                </div>
+
+                <div class="usage-split-grid">
+                    <div class="usage-section">
+                        <div class="usage-section-header">
+                            <RadzenText TextStyle="TextStyle.H3" class="usage-section-title">Last Turn</RadzenText>
+                            <strong>@model.CodexUsage.LastTurnTokens.ToString("N0")</strong>
+                        </div>
+                        <div class="usage-mini-grid">
+                            <div>
+                                <span>Fresh Input</span>
+                                <strong>@model.CodexUsage.LastTurnFreshInputTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Cached Input</span>
+                                <strong>@model.CodexUsage.LastTurnCachedInputTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Output</span>
+                                <strong>@model.CodexUsage.LastTurnOutputTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Reasoning</span>
+                                <strong>@model.CodexUsage.LastTurnReasoningOutputTokens.ToString("N0")</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="usage-section">
+                        <div class="usage-section-header">
+                            <RadzenText TextStyle="TextStyle.H3" class="usage-section-title">Scanned Window</RadzenText>
+                            <strong>@model.CodexUsage.SessionSpanLabel</strong>
+                        </div>
+                        <div class="usage-mini-grid">
+                            <div>
+                                <span>Started</span>
+                                <strong>@model.CodexUsage.FirstUsageLabel</strong>
+                            </div>
+                            <div>
+                                <span>Last Usage</span>
+                                <strong>@model.CodexUsage.LastUsageLabel</strong>
+                            </div>
+                            <div>
+                                <span>Events</span>
+                                <strong>@model.CodexUsage.UsageEventCount.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Recent Files</span>
+                                <strong>@model.CodexUsage.SessionFileCount.ToString("N0")</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="usage-detail-grid">
+                    <div class="detail-tile">
+                        <span>Total Tokens</span>
+                        <strong>@model.CodexUsage.TotalTokens.ToString("N0")</strong>
+                    </div>
+                    <div class="detail-tile">
+                        <span>Fresh Input</span>
+                        <strong>@model.CodexUsage.FreshInputTokens.ToString("N0")</strong>
+                    </div>
+                    <div class="detail-tile">
+                        <span>Cached Input</span>
+                        <strong>@model.CodexUsage.CachedInputTokens.ToString("N0")</strong>
+                    </div>
+                    <div class="detail-tile">
+                        <span>Output</span>
+                        <strong>@model.CodexUsage.OutputTokens.ToString("N0")</strong>
+                    </div>
+                </div>
+            </RadzenStack>
+        </RadzenCard>
+
+        @if (!string.IsNullOrWhiteSpace(rebuildMessage))
+        {
+            <RadzenAlert AlertStyle="@rebuildAlertStyle" ShowIcon="true" Variant="Variant.Flat">
+                @rebuildMessage
+            </RadzenAlert>
+        }
+    </RadzenStack>
 </section>
-
-@code {
-    private MonitorDashboardViewModel model = MonitorDashboardViewModel.Empty;
-    private bool isRebuildingIndex;
-    private string rebuildMessage = string.Empty;
-
-    protected override void OnInitialized()
-    {
-        model = DashboardViewService.GetDashboard();
-    }
-
-    private async Task RebuildIndexAsync()
-    {
-        if (isRebuildingIndex)
-        {
-            return;
-        }
-
-        isRebuildingIndex = true;
-        rebuildMessage = string.Empty;
-        try
-        {
-            WorkspaceStatusViewModel workspace = await WorkspaceStatusService.RebuildIndexAsync(CancellationToken.None);
-            model = DashboardViewService.GetDashboard() with
-            {
-                Workspace = workspace
-            };
-            rebuildMessage = "Index rebuild complete.";
-        }
-        catch (Exception ex)
-        {
-            rebuildMessage = ex.Message;
-        }
-        finally
-        {
-            isRebuildingIndex = false;
-        }
-    }
-}

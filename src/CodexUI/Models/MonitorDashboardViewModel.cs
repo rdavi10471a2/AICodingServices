@@ -7,6 +7,7 @@ public sealed record MonitorDashboardViewModel(
     string WatchedSolutionPath,
     McpServerViewModel McpServer,
     WorkspaceStatusViewModel Workspace,
+    CodexUsageSummaryViewModel CodexUsage,
     IReadOnlyList<DashboardStatusCard> Cards,
     IReadOnlyList<string> PendingSurfaces)
 {
@@ -17,6 +18,7 @@ public sealed record MonitorDashboardViewModel(
         "CodingServices engine adapters will provide this later.",
         McpServerViewModel.NotConnected,
         WorkspaceStatusViewModel.Empty,
+        CodexUsageSummaryViewModel.Empty,
         [],
         []);
 }

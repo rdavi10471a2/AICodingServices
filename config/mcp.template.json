@@ -1,13 +1,13 @@
 {
   "mcpServers": {
-    "ai-monitor": {
+    "aicodingservices": {
       "command": "dotnet",
       "args": [
         ".\\src\\AICodingServices.McpStdioBridge\\bin\\Debug\\net10.0\\AICodingServices.McpStdioBridge.dll",
         "--repo-root",
         ".",
         "--config",
-        ".\\src\\CodexUI\\appsettings.json"
+        ".\\config\\appsettings.json"
       ],
       "env": {}
     }

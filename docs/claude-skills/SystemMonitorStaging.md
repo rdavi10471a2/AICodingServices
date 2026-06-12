@@ -45,8 +45,8 @@ The active safety mechanism is CodingServices-owned Working files, pre-merge val
 | Replace exact text in Razor, markup, CSS, JSON, config, or other text | `replace_text_in_file` |
 | Replace a known line/column span | `replace_span_in_file` |
 | Create a brand-new file | `submit_file` |
-| Create a brand-new Razor component | Two `submit_file` calls in one session: `.razor` markup + `.razor.cs` partial-class companion. Do not start a new Razor file with inline `@code`. |
-| Migrate legacy inline-`@code` Razor to two-file form | Use `get_file`/`submit_file` carefully in one session for `.razor` and `.razor.cs`; no dedicated split tool exists yet. |
+| Create a brand-new Razor component | Three `submit_file` calls in one session: `.razor` markup + `.razor.cs` partial-class companion + `.razor.css` scoped stylesheet. Avoid starting a new Razor file with inline `@code`. |
+| Migrate legacy inline-`@code` Razor to three-file form | Use `get_file`/`submit_file` carefully in one session for `.razor`, `.razor.cs`, and `.razor.css`; no dedicated split tool exists yet. |
 | Regenerate or deliberately replace a whole file | `submit_file` |
 
 Do not use `submit_file` for ordinary member-level edits just because you have the full file in context.

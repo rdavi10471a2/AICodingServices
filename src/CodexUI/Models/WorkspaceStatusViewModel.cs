@@ -10,7 +10,9 @@ public sealed record WorkspaceStatusViewModel(
     int ProjectCount,
     int DocumentCount,
     int SymbolCount,
-    int ReferenceCount)
+    int ReferenceCount,
+    int CallSiteCount,
+    DateTimeOffset? LastBuildAt)
 {
     public string IndexLabel =>
         !IndexDatabaseExists ? "SQLite index missing" :
@@ -19,6 +21,9 @@ public sealed record WorkspaceStatusViewModel(
 
     public string CountsLabel =>
         $"{ProjectCount} projects / {DocumentCount} docs / {SymbolCount} symbols / {ReferenceCount} refs";
+
+    public string LastBuildLabel =>
+        LastBuildAt?.ToLocalTime().ToString("g") ?? "Not built";
 
     public static WorkspaceStatusViewModel Empty { get; } = new(
         "Not initialized",
@@ -30,5 +35,7 @@ public sealed record WorkspaceStatusViewModel(
         0,
         0,
         0,
-        0);
+        0,
+        0,
+        null);
 }

@@ -31,6 +31,18 @@ discover
 
 Adapters may expose different tool names, but watched source is never patched directly by the agent.
 
+## Current Self-Watch State
+
+CodingServices can watch its own `AICodingServices.slnx` and run the normal MCP edit workflow against CodingServices source. CodexUI owns the MCP hub; bridge clients should connect through server `aicodingservices`.
+
+The current self-watch runtime root is `runtime/watched-solutions/AICodingServices-39e024bddbff/`. Confirm the live watched target with `get_monitor_status` before building, validating, or describing project state.
+
+## Token Evidence
+
+The synthetic edit benchmark in `tests/unit/AICodingServices.Data.Tests/SyntheticEditWorkflowTokenBenchmarkTests.cs` is the cleanest current evidence for token savings. Its latest result shows precise MCP-style edits at `23,970` token-proxy units versus `70,052` for manual full-file context, a `65.8%` reduction. Whole-file MCP `submit_file` edits measured `93,636`, which is worse than manual and `3.91x` the precise MCP cost.
+
+The Codex log review covered `80` session files, `79` with token events, and `26,356` token-count events from `2026-02-28` through `2026-06-12`. Treat that history as mostly normal Codex usage except for the latest synthetic benchmark; it is useful background, not clean causal proof.
+
 ## Local Composition Contract
 
 Reason in the cloud; compose locally.

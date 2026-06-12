@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject SourceNavigationState SourceNavigationState
 
 <div class="app-shell">
     <header class="top-shell">
@@ -8,7 +9,7 @@
         </div>
         <nav class="tab-list" aria-label="Primary">
             <NavLink href="/" Match="NavLinkMatch.All">Overview</NavLink>
-            <NavLink href="/watched-solution">Source</NavLink>
+            <NavLink href="@SourceNavigationState.SourceHref">Source</NavLink>
         </nav>
     </header>
 

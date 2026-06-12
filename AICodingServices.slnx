@@ -24,6 +24,8 @@
     <Project Path="tests/unit/AICodingServices.Workflow.Tests/AICodingServices.Workflow.Tests.csproj" />
     <Project Path="tests/unit/AICodingServices.Indexing.Tests/AICodingServices.Indexing.Tests.csproj" />
     <Project Path="tests/unit/AICodingServices.Runtime.Tests/AICodingServices.Runtime.Tests.csproj" />
+    <Project Path="tests/unit/AICodingServices.McpStdioBridge.Tests/AICodingServices.McpStdioBridge.Tests.csproj" />
+    <Project Path="tests/unit/CodexUI.Tests/CodexUI.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/smoke/">
     <Project Path="tests/smoke/AICodingServices.LanguageCorpusSmokeTests/AICodingServices.LanguageCorpusSmokeTests.csproj" />
