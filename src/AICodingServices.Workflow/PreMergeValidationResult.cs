@@ -12,5 +12,7 @@ public sealed class PreMergeValidationResult
 
     public string ValidationWorkspacePath { get; set; } = string.Empty;
 
+    public GovernedCommandReductionResult[] CommandReductions { get; set; } = [];
+
     public string Message { get; set; } = string.Empty;
 }

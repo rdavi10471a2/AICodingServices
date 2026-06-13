@@ -97,8 +97,8 @@ public sealed class PreMergeValidationService
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            ValidationBuildResult build = RunValidationBuilds(buildTargets, sourceRoot, artifactsPath, overlayTargetsPath);
-            string[] errorDiagnostics = ExtractBuildErrors(build.Output);
+            ValidationBuildResult build = RunValidationBuilds(buildTargets, sourceRoot, artifactsPath, overlayTargetsPath, settings.RuntimeRoot);
+            string[] errorDiagnostics = ExtractGovernedBuildErrors(build);
             if (build.Failed && errorDiagnostics.Length == 0)
             {
                 errorDiagnostics = [$"dotnet build exited with code {build.ExitCode} but did not emit parseable error diagnostics."];
@@ -111,6 +111,7 @@ public sealed class PreMergeValidationService
                 DiagnosticCount = errorDiagnostics.Length,
                 Diagnostics = errorDiagnostics,
                 ValidationWorkspacePath = validationWorkspaceRoot,
+                CommandReductions = build.CommandReductions,
                 Message = build.TimedOut
                     ? CreateValidationMessage("timed out", overlayRecords.Length, buildTargets.Length)
                     : build.Failed
@@ -194,56 +195,78 @@ public sealed class PreMergeValidationService
         string[] buildTargets,
         string sourceRoot,
         string artifactsPath,
-        string overlayTargetsPath)
+        string overlayTargetsPath,
+        string runtimeRoot)
     {
         List<string> outputBlocks = [];
+        List<GovernedCommandReductionResult> commandReductions = [];
         int lastExitCode = 0;
         bool timedOut = false;
+        GovernedCommandOutputReducer reducer = new();
+        GovernedCommandArtifactWriter artifactWriter = new(runtimeRoot);
         foreach (string buildTarget in buildTargets)
         {
+            string[] restoreArguments =
+            [
+                "restore",
+                buildTarget,
+                "--artifacts-path",
+                artifactsPath,
+                "/p:NuGetAudit=false",
+                DisableDefaultScopedCssItemsProperty,
+                $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
+            ];
             ProcessResult restore = RunProcess(
                 "dotnet",
-                [
-                    "restore",
-                    buildTarget,
-                    "--artifacts-path",
-                    artifactsPath,
-                    "/p:NuGetAudit=false",
-                    DisableDefaultScopedCssItemsProperty,
-                    $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
-                ],
+                restoreArguments,
                 sourceRoot,
                 TimeSpan.FromMinutes(3));
+            GovernedCommandReductionResult restoreReduction = ReduceProcessResult(
+                reducer,
+                artifactWriter,
+                "dotnet",
+                restoreArguments,
+                sourceRoot,
+                restore);
+            commandReductions.Add(restoreReduction);
             lastExitCode = restore.ExitCode;
             timedOut = timedOut || restore.TimedOut;
-            outputBlocks.Add(restore.StandardOutput);
-            outputBlocks.Add(restore.StandardError);
+            outputBlocks.Add(restoreReduction.VisibleOutput);
             if (restore.TimedOut || restore.ExitCode != 0)
             {
                 break;
             }
 
+            string[] buildArguments =
+            [
+                "build",
+                buildTarget,
+                "--no-restore",
+                "--nologo",
+                "-v:minimal",
+                "--artifacts-path",
+                artifactsPath,
+                "/p:UseAppHost=false",
+                "/p:NuGetAudit=false",
+                DisableDefaultScopedCssItemsProperty,
+                $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
+            ];
             ProcessResult build = RunProcess(
                 "dotnet",
-                [
-                    "build",
-                    buildTarget,
-                    "--no-restore",
-                    "--nologo",
-                    "-v:minimal",
-                    "--artifacts-path",
-                    artifactsPath,
-                    "/p:UseAppHost=false",
-                    "/p:NuGetAudit=false",
-                    DisableDefaultScopedCssItemsProperty,
-                    $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
-                ],
+                buildArguments,
                 sourceRoot,
                 TimeSpan.FromMinutes(3));
+            GovernedCommandReductionResult buildReduction = ReduceProcessResult(
+                reducer,
+                artifactWriter,
+                "dotnet",
+                buildArguments,
+                sourceRoot,
+                build);
+            commandReductions.Add(buildReduction);
             lastExitCode = build.ExitCode;
             timedOut = timedOut || build.TimedOut;
-            outputBlocks.Add(build.StandardOutput);
-            outputBlocks.Add(build.StandardError);
+            outputBlocks.Add(buildReduction.VisibleOutput);
             if (build.TimedOut || build.ExitCode != 0)
             {
                 break;
@@ -254,7 +277,8 @@ public sealed class PreMergeValidationService
             lastExitCode,
             timedOut,
             timedOut || lastExitCode != 0,
-            string.Join(Environment.NewLine, outputBlocks));
+            string.Join(Environment.NewLine, outputBlocks),
+            commandReductions.ToArray());
     }
 
     private static string[] ResolveValidationProjectPaths(string watchedSolutionPath, string sourceRoot)
@@ -465,6 +489,70 @@ public sealed class PreMergeValidationService
             || directoryName.Equals("runtime", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string[] ExtractGovernedBuildErrors(ValidationBuildResult build)
+    {
+        string[] governedDiagnostics = build.CommandReductions
+            .SelectMany(reduction => reduction.Diagnostics)
+            .Where(diagnostic => diagnostic.Severity.Equals("error", StringComparison.OrdinalIgnoreCase))
+            .Select(FormatDiagnostic)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToArray();
+        if (governedDiagnostics.Length > 0)
+        {
+            return governedDiagnostics;
+        }
+
+        return ExtractBuildErrors(build.Output);
+    }
+
+    private static string FormatDiagnostic(GovernedCommandDiagnostic diagnostic)
+    {
+        string location = string.IsNullOrWhiteSpace(diagnostic.FilePath)
+            ? string.Empty
+            : $" ({diagnostic.FilePath}:{diagnostic.Line})";
+        return $"{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}{location}";
+    }
+
+    private static GovernedCommandReductionResult ReduceProcessResult(
+        GovernedCommandOutputReducer reducer,
+        GovernedCommandArtifactWriter artifactWriter,
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        ProcessResult process)
+    {
+        GovernedCommandRequest request = new(CreateCommandText(fileName, arguments), workingDirectory);
+        GovernedCommandRawResult raw = new(
+            process.StandardOutput,
+            process.StandardError,
+            process.ExitCode,
+            process.Duration);
+        GovernedCommandKind kind = GovernedCommandOutputReducer.Classify(request.Command);
+        string artifactPath = artifactWriter.WriteArtifact(request, raw, kind);
+        return reducer.Reduce(request, raw, artifactPath);
+    }
+
+    private static string CreateCommandText(string fileName, IReadOnlyList<string> arguments)
+    {
+        return fileName + " " + string.Join(" ", arguments.Select(QuoteArgument));
+    }
+
+    private static string QuoteArgument(string argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            return "\"\"";
+        }
+
+        if (!argument.Any(char.IsWhiteSpace) && !argument.Contains('"', StringComparison.Ordinal))
+        {
+            return argument;
+        }
+
+        return "\"" + argument.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
+
     private static ProcessResult RunProcess(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -472,6 +560,7 @@ public sealed class PreMergeValidationService
         TimeSpan timeout)
     {
         Process process = new();
+        Stopwatch stopwatch = new();
         try
         {
             process.StartInfo = new ProcessStartInfo(fileName)
@@ -486,10 +575,12 @@ public sealed class PreMergeValidationService
                 process.StartInfo.ArgumentList.Add(argument);
             }
 
+            stopwatch.Start();
             process.Start();
             Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
             Task<string> standardError = process.StandardError.ReadToEndAsync();
             bool exited = process.WaitForExit(timeout);
+            stopwatch.Stop();
             if (!exited)
             {
                 try
@@ -505,7 +596,8 @@ public sealed class PreMergeValidationService
                 exited ? process.ExitCode : -1,
                 !exited,
                 standardOutput.GetAwaiter().GetResult(),
-                standardError.GetAwaiter().GetResult());
+                standardError.GetAwaiter().GetResult(),
+                stopwatch.Elapsed);
         }
         finally
         {
@@ -533,11 +625,13 @@ public sealed class PreMergeValidationService
         int ExitCode,
         bool TimedOut,
         string StandardOutput,
-        string StandardError);
+        string StandardError,
+        TimeSpan Duration);
 
     private sealed record ValidationBuildResult(
         int ExitCode,
         bool TimedOut,
         bool Failed,
-        string Output);
+        string Output,
+        GovernedCommandReductionResult[] CommandReductions);
 }

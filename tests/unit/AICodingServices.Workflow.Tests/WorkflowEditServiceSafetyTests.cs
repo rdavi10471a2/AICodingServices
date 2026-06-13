@@ -547,6 +547,14 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.True(validation.IsError);
         Assert.Equal("failed", validation.Status);
         Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("CS1525", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.Diagnostics.Any(diagnostic => string.Equals(diagnostic.Code, "CS1525", StringComparison.OrdinalIgnoreCase)));
+        Assert.All(
+            validation.CommandReductions,
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(fixture.SmokeFilePath)!, "obj", "Debug", "net10.0", "apphost.exe")));
     }
 
@@ -563,6 +571,15 @@ public sealed class WorkflowEditServiceSafetyTests
 
         Assert.False(validation.IsError, string.Join(Environment.NewLine, validation.Diagnostics));
         Assert.Equal("passed", validation.Status);
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(validation.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
+        Assert.All(
+            validation.CommandReductions,
+            reduction =>
+            {
+                Assert.True(reduction.RawOutputCharacters >= reduction.VisibleOutputCharacters);
+                Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath);
+            });
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }
