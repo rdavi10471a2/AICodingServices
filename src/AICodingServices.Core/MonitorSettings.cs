@@ -4,7 +4,9 @@ public sealed record MonitorSettings(
     string RepositoryRoot,
     string RuntimeRoot,
     string WatchedSolutionPath,
-    IReadOnlyList<string> WinMergeCandidatePaths)
+    IReadOnlyList<string> WinMergeCandidatePaths,
+    string DefaultReviewSurface,
+    string BrowserReviewBaseUrl)
 {
     public string WatchedProjectFolder =>
         Path.GetDirectoryName(WatchedSolutionPath) ?? string.Empty;
@@ -13,7 +15,9 @@ public sealed record MonitorSettings(
         string repositoryRoot,
         string watchedSolutionPath,
         string? runtimeRoot = null,
-        IReadOnlyList<string>? winMergeCandidatePaths = null)
+        IReadOnlyList<string>? winMergeCandidatePaths = null,
+        string? defaultReviewSurface = null,
+        string? browserReviewBaseUrl = null)
     {
         string resolvedRepositoryRoot = Path.GetFullPath(repositoryRoot);
         string resolvedWatchedSolutionPath = Path.GetFullPath(watchedSolutionPath);
@@ -24,6 +28,8 @@ public sealed record MonitorSettings(
             resolvedRepositoryRoot,
             resolvedRuntimeRoot,
             resolvedWatchedSolutionPath,
-            winMergeCandidatePaths ?? []);
+            winMergeCandidatePaths ?? [],
+            string.IsNullOrWhiteSpace(defaultReviewSurface) ? "Browser" : defaultReviewSurface,
+            string.IsNullOrWhiteSpace(browserReviewBaseUrl) ? "http://localhost:5000" : browserReviewBaseUrl.TrimEnd('/'));
     }
 }

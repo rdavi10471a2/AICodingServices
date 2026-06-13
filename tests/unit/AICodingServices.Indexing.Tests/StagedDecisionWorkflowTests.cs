@@ -95,6 +95,69 @@ public sealed class StagedDecisionWorkflowTests
     }
 
     [Fact]
+    public void Record_skips_index_refresh_for_non_indexed_asset_after_accept()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesIndexingTests", Guid.NewGuid().ToString("N"));
+        string repositoryRoot = Path.Combine(tempRoot, "Repo");
+        string runtimeRoot = Path.Combine(tempRoot, "Runtime");
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string projectPath = Path.Combine(watchedRoot, "Example.csproj");
+        string sourcePath = Path.Combine(watchedRoot, "Widget.razor.css");
+
+        Directory.CreateDirectory(watchedRoot);
+        File.WriteAllText(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <OutputType>Library</OutputType>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(sourcePath, ".title { color: red; }");
+
+        MonitorSettings settings = MonitorSettings.Create(repositoryRoot, projectPath, runtimeRoot);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus refresh = workflowService.Refresh(sourcePath);
+        File.WriteAllText(refresh.WorkingFilePath, ".title { color: blue; }");
+        StagedEditRecord record = workflowService.Stage(sourcePath);
+        workflowService.RecordPreMergeValidation(
+            record.StagedRecordId,
+            new PreMergeValidationResult { Status = "passed", IsError = false },
+            forceApproved: false);
+        workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, "test launch");
+        File.Copy(record.StagedFilePath, sourcePath, overwrite: true);
+
+        ReviewDecisionWithIndexRefreshResult result = new StagedDecisionWorkflow().Record(
+            settings,
+            NullMonitorLogger.Instance,
+            workflowService,
+            record.StagedRecordId,
+            "accepted",
+            record.StagedHash,
+            "AICodingServices.Indexing.Tests",
+            deferIndexRefresh: false,
+            refreshPlan: new PostAcceptIndexRefreshPlan
+            {
+                ChangedFilePaths = [sourcePath],
+                OwningProjectPaths = [projectPath]
+            });
+
+        EditSessionStatus status = workflowService.GetStatus(sourcePath);
+        Assert.Equal("accepted", result.Classification);
+        Assert.NotNull(result.IndexRefresh);
+        Assert.Equal("skipped", result.IndexRefresh.Status);
+        Assert.Equal("non-indexed-assets", result.IndexRefresh.RefreshMode);
+        Assert.False(result.IndexRefresh.IsError);
+        Assert.Contains("skipped", result.NextStep, StringComparison.OrdinalIgnoreCase);
+        Assert.False(status.IndexStale);
+        Assert.True(status.RequiresRefresh);
+    }
+
+    [Fact]
     public void Record_blocks_terminal_planned_accept_when_accepted_overlay_does_not_build()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesIndexingTests", Guid.NewGuid().ToString("N"));

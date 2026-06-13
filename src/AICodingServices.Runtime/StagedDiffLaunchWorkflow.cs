@@ -15,10 +15,17 @@ public sealed class StagedDiffLaunchWorkflow
         string? diffToolPath = null,
         bool forceValidation = false,
         bool deferBuildValidationUntilAccept = false,
-        bool verbose = false)
+        bool verbose = false,
+        StagedReviewLaunchSurface? launchSurface = null,
+        string? browserReviewBaseUrl = null,
+        string? browserPath = null)
     {
         StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
         WorkflowEditService.EnsureRecordNotDecided(record);
+        StagedReviewLaunchSurface resolvedLaunchSurface = launchSurface ?? ResolveLaunchSurface(settings.DefaultReviewSurface);
+        string resolvedBrowserReviewBaseUrl = string.IsNullOrWhiteSpace(browserReviewBaseUrl)
+            ? settings.BrowserReviewBaseUrl
+            : browserReviewBaseUrl;
 
         IReadOnlyList<StagedEditRecord> stagedOverlayRecords = GetStagedOverlayRecords(workflowService, record);
         PreMergeValidationService validationService = new();
@@ -74,10 +81,12 @@ public sealed class StagedDiffLaunchWorkflow
                 DiffLaunch = new DiffLaunchResult
                 {
                     Launched = false,
-                    Tool = "WinMerge",
+                    Tool = resolvedLaunchSurface == StagedReviewLaunchSurface.Browser ? "Browser" : "WinMerge",
                     ToolPath = string.Empty,
                     ProcessId = 0,
-                    Message = "Pre-merge validation failed. Human approval is required before force-launching WinMerge."
+                    Message = resolvedLaunchSurface == StagedReviewLaunchSurface.Browser
+                        ? "Pre-merge validation failed. Human approval is required before force-launching browser review."
+                        : "Pre-merge validation failed. Human approval is required before force-launching WinMerge."
                 },
                 NextStep = PreMergeValidationOverridePrompt.CanShow()
                     ? "Human cancelled validation override. Fix and restage before launching WinMerge."
@@ -85,26 +94,31 @@ public sealed class StagedDiffLaunchWorkflow
             };
         }
 
-        record = workflowService.PrepareReviewFileForLaunch(record.StagedRecordId);
-        DiffLaunchResult launch = new WinMergeDiffToolLauncher().Launch(new DiffLaunchRequest
-        {
-            OriginalFilePath = string.IsNullOrWhiteSpace(record.ReviewBaselineFilePath)
-                ? record.WatchedFilePath
-                : record.ReviewBaselineFilePath,
-            ProposedFilePath = record.StagedFilePath,
-            ExplicitToolPath = diffToolPath,
-            CandidateToolPaths = settings.WinMergeCandidatePaths
-        });
-        StagedEditRecord updated = workflowService.RecordDiffLaunch(record.StagedRecordId, launch.Launched, launch.Message);
+        bool isPlannedBrowserSession = IsPlannedBrowserSession(record, resolvedLaunchSurface);
+        bool browserSessionAlreadyLaunched = isPlannedBrowserSession && HasLaunchedReviewRecord(stagedOverlayRecords);
+        record = PrepareReviewFilesForLaunch(workflowService, record, stagedOverlayRecords, isPlannedBrowserSession);
+        DiffLaunchResult launch = browserSessionAlreadyLaunched
+            ? BrowserStagedReviewLauncher.CreateReuseResult(resolvedBrowserReviewBaseUrl, record)
+            : LaunchReviewSurface(
+                settings,
+                record,
+                diffToolPath,
+                resolvedLaunchSurface,
+                resolvedBrowserReviewBaseUrl,
+                browserPath);
+        StagedEditRecord updated = RecordDiffLaunch(
+            workflowService,
+            record,
+            stagedOverlayRecords,
+            launch,
+            recordBatchLaunch: isPlannedBrowserSession);
         return new StagedDiffLaunchWorkflowResult
         {
             StagedRecordSummary = workflowService.CreateSummary(updated),
             StagedRecord = verbose ? updated : null,
             PreMergeValidation = validation,
             DiffLaunch = launch,
-            NextStep = record.IsNewFile
-                ? "After WinMerge review, save the staged candidate into watched source for accept, or leave watched source absent for reject. Then record the diff decision."
-                : "After WinMerge review, save the staged candidate into the watched source for accept, or leave watched source unchanged for reject. Then record the diff decision."
+            NextStep = GetNextStep(record, resolvedLaunchSurface)
         };
     }
 
@@ -173,6 +187,117 @@ public sealed class StagedDiffLaunchWorkflow
                 : "Reused passed planned overlay validation result for this staged batch."
         };
         return new RecordedValidation(validation, firstRecord.PreMergeValidationForceApproved);
+    }
+
+    private static StagedEditRecord PrepareReviewFilesForLaunch(
+        WorkflowEditService workflowService,
+        StagedEditRecord currentRecord,
+        IReadOnlyList<StagedEditRecord> stagedOverlayRecords,
+        bool prepareBatch)
+    {
+        if (!prepareBatch)
+        {
+            return workflowService.PrepareReviewFileForLaunch(currentRecord.StagedRecordId);
+        }
+
+        StagedEditRecord updatedCurrentRecord = currentRecord;
+        foreach (StagedEditRecord overlayRecord in stagedOverlayRecords)
+        {
+            StagedEditRecord updatedOverlayRecord = workflowService.PrepareReviewFileForLaunch(overlayRecord.StagedRecordId);
+            if (overlayRecord.StagedRecordId.Equals(currentRecord.StagedRecordId, StringComparison.Ordinal))
+            {
+                updatedCurrentRecord = updatedOverlayRecord;
+            }
+        }
+
+        return updatedCurrentRecord;
+    }
+
+    private static StagedEditRecord RecordDiffLaunch(
+        WorkflowEditService workflowService,
+        StagedEditRecord currentRecord,
+        IReadOnlyList<StagedEditRecord> stagedOverlayRecords,
+        DiffLaunchResult launch,
+        bool recordBatchLaunch)
+    {
+        if (!recordBatchLaunch)
+        {
+            return workflowService.RecordDiffLaunch(currentRecord.StagedRecordId, launch.Launched, launch.Message);
+        }
+
+        StagedEditRecord updatedCurrentRecord = currentRecord;
+        foreach (StagedEditRecord overlayRecord in stagedOverlayRecords)
+        {
+            StagedEditRecord updatedOverlayRecord = workflowService.RecordDiffLaunch(
+                overlayRecord.StagedRecordId,
+                launch.Launched,
+                launch.Message);
+            if (overlayRecord.StagedRecordId.Equals(currentRecord.StagedRecordId, StringComparison.Ordinal))
+            {
+                updatedCurrentRecord = updatedOverlayRecord;
+            }
+        }
+
+        return updatedCurrentRecord;
+    }
+
+    private static bool IsPlannedBrowserSession(StagedEditRecord record, StagedReviewLaunchSurface launchSurface)
+    {
+        return launchSurface == StagedReviewLaunchSurface.Browser
+            && !string.IsNullOrWhiteSpace(record.SessionId);
+    }
+
+    private static bool HasLaunchedReviewRecord(IReadOnlyList<StagedEditRecord> stagedOverlayRecords)
+    {
+        return stagedOverlayRecords.Any(record => record.LaunchStatus.Equals("launched", StringComparison.OrdinalIgnoreCase));
+    }
+    private static DiffLaunchResult LaunchReviewSurface(
+        MonitorSettings settings,
+        StagedEditRecord record,
+        string? diffToolPath,
+        StagedReviewLaunchSurface launchSurface,
+        string browserReviewBaseUrl,
+        string? browserPath)
+    {
+        if (launchSurface == StagedReviewLaunchSurface.Browser)
+        {
+            return new BrowserStagedReviewLauncher().Launch(
+                browserReviewBaseUrl,
+                record,
+                browserPath);
+        }
+
+        return new WinMergeDiffToolLauncher().Launch(new DiffLaunchRequest
+        {
+            OriginalFilePath = string.IsNullOrWhiteSpace(record.ReviewBaselineFilePath)
+                ? record.WatchedFilePath
+                : record.ReviewBaselineFilePath,
+            ProposedFilePath = record.StagedFilePath,
+            ExplicitToolPath = diffToolPath,
+            CandidateToolPaths = settings.WinMergeCandidatePaths
+        });
+    }
+
+    private static StagedReviewLaunchSurface ResolveLaunchSurface(string configuredSurface)
+    {
+        if (Enum.TryParse(configuredSurface, ignoreCase: true, out StagedReviewLaunchSurface launchSurface))
+        {
+            return launchSurface;
+        }
+
+        return StagedReviewLaunchSurface.Browser;
+    }
+
+    private static string GetNextStep(StagedEditRecord record, StagedReviewLaunchSurface launchSurface)
+    {
+        if (launchSurface == StagedReviewLaunchSurface.Browser)
+        {
+            return "Use the browser review page to accept or reject the staged record. Accept writes the proposed candidate into current source and records the workflow decision.";
+        }
+
+        return record.IsNewFile
+            ? "After WinMerge review, save the staged candidate into watched source for accept, or leave watched source absent for reject. Then record the diff decision."
+            : "After WinMerge review, save the staged candidate into the watched source for accept, or leave watched source unchanged for reject. Then record the diff decision.";
     }
 
     private static IReadOnlyList<StagedEditRecord> GetStagedOverlayRecords(

@@ -35,12 +35,16 @@ public static class MonitorSettingsLoader
             monitor,
             resolvedRepositoryRoot,
             settingsDirectory);
+        string defaultReviewSurface = GetString(monitor, "DefaultReviewSurface") ?? "Browser";
+        string browserReviewBaseUrl = GetString(monitor, "BrowserReviewBaseUrl") ?? "http://localhost:5000";
 
         return MonitorSettings.Create(
             resolvedRepositoryRoot,
             ResolvePath(watchedSolutionPath, settingsDirectory),
             ResolvePath(runtimeRoot, resolvedRepositoryRoot),
-            ResolvePaths(winMergeCandidatePaths, settingsDirectory));
+            ResolvePaths(winMergeCandidatePaths, settingsDirectory),
+            defaultReviewSurface,
+            browserReviewBaseUrl);
     }
 
     public static string SaveLocal(
@@ -60,11 +64,21 @@ public static class MonitorSettingsLoader
         IReadOnlyList<string> existingWinMergeCandidatePaths = LoadExistingWinMergeCandidatePaths(
             resolvedSettingsPath,
             resolvedRepositoryRoot);
+        string existingDefaultReviewSurface = LoadExistingString(
+            resolvedSettingsPath,
+            "DefaultReviewSurface",
+            "Browser");
+        string existingBrowserReviewBaseUrl = LoadExistingString(
+            resolvedSettingsPath,
+            "BrowserReviewBaseUrl",
+            "http://localhost:5000");
         LocalSettingsFile file = new(
             new LocalMonitorSettings(
                 resolvedWatchedSolutionPath,
                 resolvedRuntimeRoot,
-                existingWinMergeCandidatePaths));
+                existingWinMergeCandidatePaths,
+                existingDefaultReviewSurface,
+                existingBrowserReviewBaseUrl));
         File.WriteAllText(resolvedSettingsPath, JsonSerializer.Serialize(file, SerializerOptions) + Environment.NewLine);
         return resolvedSettingsPath;
     }
@@ -151,6 +165,27 @@ public static class MonitorSettingsLoader
             : LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
     }
 
+    private static string LoadExistingString(string settingsPath, string propertyName, string defaultValue)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            return defaultValue;
+        }
+
+        using (FileStream stream = File.OpenRead(settingsPath))
+        {
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor))
+                {
+                    return defaultValue;
+                }
+
+                return GetString(monitor, propertyName) ?? defaultValue;
+            }
+        }
+    }
+
     private static IReadOnlyList<string> LoadTemplateWinMergeCandidatePaths(string resolvedRepositoryRoot)
     {
         string templatePath = Path.Combine(resolvedRepositoryRoot, "config", "appsettings.template.json");
@@ -190,5 +225,7 @@ public static class MonitorSettingsLoader
     private sealed record LocalMonitorSettings(
         string WatchedSolutionPath,
         string RuntimeRoot,
-        IReadOnlyList<string> WinMergeCandidatePaths);
+        IReadOnlyList<string> WinMergeCandidatePaths,
+        string DefaultReviewSurface,
+        string BrowserReviewBaseUrl);
 }

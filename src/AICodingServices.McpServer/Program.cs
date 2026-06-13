@@ -7,6 +7,7 @@ using AICodingServices.Workflow;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -158,9 +159,62 @@ public sealed class AICodingServicesTools
             File.Exists(settings.WatchedSolutionPath),
             Directory.Exists(settings.WatchedProjectFolder),
             settings.WinMergeCandidatePaths.FirstOrDefault(File.Exists),
-            "agents edit monitor-owned Working candidates only; WinMerge review/save remains the watched-source mutation surface",
+            "agents edit monitor-owned Working candidates only; staged browser review is the default watched-source mutation surface, with WinMerge available as a fallback",
             overallStatus,
             guardrails);
+    }
+
+    [McpServerTool]
+    [Description("Initialize Coding Services through Semantic Kernel. This keeps a healthy CodexUI alive, only restarts it when the site probe fails, and logs each startup step while the workflow runs.")]
+    public async Task<string> InitializeCodingServices(
+        [Description("Optional repository root override. Defaults to the current monitor repository root.")] string? repositoryRoot = null,
+        [Description("Optional explicit appsettings.json path. Defaults to the active monitor config.")] string? settingsPath = null,
+        [Description("Optional explicit site URL. Defaults to http://localhost:5000/.")] string siteUrl = "http://localhost:5000/",
+        [Description("When the site probe fails, stop discovered CodexUI processes before restart.")] bool stopExistingProcesses = true,
+        [Description("When the site probe fails, attempt to start CodexUI again.")] bool startCodexUi = true,
+        [Description("Whether to ask the host for a thread remount before direct bridge fallback. In-process MCP calls cannot reset the host thread, so this is informational here.")] bool attemptThreadReset = true)
+    {
+        runtimeState.Touch();
+
+        string resolvedRepositoryRoot = string.IsNullOrWhiteSpace(repositoryRoot)
+            ? settings.RepositoryRoot
+            : Path.GetFullPath(repositoryRoot);
+        string resolvedSettingsPath = string.IsNullOrWhiteSpace(settingsPath)
+            ? Path.Combine(resolvedRepositoryRoot, "config", "appsettings.json")
+            : Path.GetFullPath(settingsPath);
+
+        CodingServicesSessionStartupWorkflow workflow = new(
+            new LocalCodingServicesSessionStartupRuntime(),
+            new AttachedMcpSessionHostController());
+        CodingServicesSessionStartupPlugin plugin = new(
+            workflow,
+            (step, cancellationToken) =>
+            {
+                LogStartupStep(step, resolvedRepositoryRoot, resolvedSettingsPath);
+                return Task.CompletedTask;
+            });
+
+        Kernel kernel = Kernel.CreateBuilder().Build();
+        kernel.Plugins.AddFromObject(plugin, "CodingServicesSessionStartup");
+
+        KernelArguments arguments = new()
+        {
+            ["repositoryRoot"] = resolvedRepositoryRoot,
+            ["settingsPath"] = resolvedSettingsPath,
+            ["siteUrl"] = siteUrl,
+            ["stopExistingProcesses"] = stopExistingProcesses,
+            ["startCodexUi"] = startCodexUi,
+            ["attemptThreadReset"] = attemptThreadReset
+        };
+
+        FunctionResult result = await kernel.InvokeAsync(
+            "CodingServicesSessionStartup",
+            "initialize_coding_services",
+            arguments);
+        string? message = result.GetValue<string>();
+        return string.IsNullOrWhiteSpace(message)
+            ? "Initialize Coding Services completed without a message."
+            : message;
     }
 
     [McpServerTool]
@@ -912,7 +966,7 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Classify a completed WinMerge review for a staged edit. Accepted decisions require the expected staged hash.")]
+    [Description("Classify a completed staged review for a staged edit. Accepted decisions require the expected staged hash.")]
     public ReviewDecisionWithIndexRefreshResult RecordDiffDecision(
         [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
         [Description("Operator-reported outcome: accepted or rejected.")] string decision,
@@ -936,7 +990,7 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Run pre-merge validation, then launch WinMerge for a staged edit record and return review paths.")]
+    [Description("Run pre-merge validation, then launch the configured review surface for a staged edit record. Browser review is the default; WinMerge remains available as an explicit fallback.")]
     public AICodingServicesStagedDiffLaunchResult LaunchStagedDiff(
         [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
         [Description("Explicit diff tool executable path.")] string? diffToolPath = null,
@@ -956,6 +1010,38 @@ public sealed class AICodingServicesTools
             forceValidation,
             deferBuildValidationUntilAccept,
             verbose);
+        return new AICodingServicesStagedDiffLaunchResult(
+            result.StagedRecordSummary,
+            result.StagedRecord,
+            result.PreMergeValidation,
+            result.DiffLaunch,
+            result.NextStep);
+    }
+
+    [McpServerTool]
+    [Description("Run pre-merge validation, then launch the CodexUI browser staged review page for a staged edit record.")]
+    public AICodingServicesStagedDiffLaunchResult LaunchStagedBrowserReview(
+        [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
+        [Description("CodexUI base URL used to build /review/staged/{stagedRecordId}. Defaults to http://localhost:5000.")] string browserReviewBaseUrl = "http://localhost:5000",
+        [Description("Explicit browser executable path. When omitted, the system default browser handles the URL.")] string? browserPath = null,
+        [Description("Force launch after an explicit human validation override.")] bool forceValidation = false,
+        [Description("Return the full staged record inline for debugging. Defaults to compact response.")] bool verbose = false)
+    {
+        runtimeState.Touch();
+        StagedEditRecord stagedRecord = workflowService.GetStagedRecord(stagedRecordId);
+        bool deferBuildValidationUntilAccept = ShouldDeferBuildValidationUntilAccept(stagedRecord);
+        StagedDiffLaunchWorkflowResult result = new StagedDiffLaunchWorkflow().Launch(
+            settings,
+            logger,
+            workflowService,
+            stagedRecordId,
+            "AICodingServices.McpServer",
+            forceValidation: forceValidation,
+            deferBuildValidationUntilAccept: deferBuildValidationUntilAccept,
+            verbose: verbose,
+            launchSurface: StagedReviewLaunchSurface.Browser,
+            browserReviewBaseUrl: browserReviewBaseUrl,
+            browserPath: browserPath);
         return new AICodingServicesStagedDiffLaunchResult(
             result.StagedRecordSummary,
             result.StagedRecord,
@@ -1170,7 +1256,7 @@ public sealed class AICodingServicesTools
         builder.AppendLine("- Existing files enter through `refresh_file`; future files enter through `new_file`.");
         builder.AppendLine("- MCP edit sessions start with `start_monitor_session` and a non-empty `filesPlanned` list.");
         builder.AppendLine("- Candidate edits happen in monitor-owned Working files.");
-        builder.AppendLine("- Review uses `stage_candidate_for_review`, `launch_staged_diff`, WinMerge review/save, and `record_diff_decision`.");
+        builder.AppendLine("- Review uses `stage_candidate_for_review`, `launch_staged_diff`, browser staged review by default, and recorded accept/reject decisions. WinMerge remains available as an explicit fallback.");
         builder.AppendLine("- Planned sessions require all planned files to be staged before review launch.");
         builder.AppendLine("- Planned sessions defer the expensive build/index pass until all planned files are accepted/rejected.");
         builder.AppendLine("- Accepted decisions trigger index refresh metadata after the planned session reaches terminal decisions; refresh before editing the same watched file again.");
@@ -1190,8 +1276,8 @@ public sealed class AICodingServicesTools
         builder.AppendLine("4. For existing files, call `refresh_file`. For future watched files, call `new_file`.");
         builder.AppendLine("5. Edit only the monitor-owned Working candidate with `submit_file`, text/span tools, or Roslyn typed edit tools.");
         builder.AppendLine("6. Stage every planned file with `stage_candidate_for_review(path, sessionId)`.");
-        builder.AppendLine("7. Launch review with `launch_staged_diff` for every planned staged record before recording decisions; planned sessions require the full staged file set before WinMerge opens.");
-        builder.AppendLine("8. The operator reviews/saves every planned file in WinMerge. WinMerge is the watched-source mutation surface.");
+        builder.AppendLine("7. Launch review with `launch_staged_diff` for every planned staged record before recording decisions; planned sessions require the full staged file set before browser review opens.");
+        builder.AppendLine("8. The operator accepts or rejects every planned file in the staged browser review. Browser review is the default watched-source mutation surface; WinMerge is an explicit fallback.");
         builder.AppendLine("9. Record each result with `record_diff_decision`.");
         builder.AppendLine("10. After the last planned file reaches a terminal decision, inspect `indexRefresh` and call `refresh_file` before editing any accepted watched file again.");
         builder.AppendLine();
@@ -1199,7 +1285,7 @@ public sealed class AICodingServicesTools
         builder.AppendLine();
         builder.AppendLine("- `blocked`, `dirty-unexpected`, `superseded`, missing Working files, and stale hashes require recovery before follow-up edits.");
         builder.AppendLine("- Planned-session launch checks staged overlay readiness; the full build/index validation runs at the terminal planned accept, not once per staged file.");
-        builder.AppendLine("- Do not manually copy candidates into watched source outside WinMerge/decision classification.");
+        builder.AppendLine("- Do not manually copy candidates into watched source outside staged review decision classification.");
         return builder.ToString();
     }
 
@@ -1679,6 +1765,44 @@ public sealed class AICodingServicesTools
         char[] invalid = Path.GetInvalidFileNameChars();
         string clean = new(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
         return string.IsNullOrWhiteSpace(clean) ? "item" : clean;
+    }
+
+    private void LogStartupStep(CodingServicesStartupStep step, string repositoryRoot, string settingsPath)
+    {
+        logger.Write(
+            MonitorLogLevel.Information,
+            "AICodingServices.McpServer",
+            "adapter.mcp.initialize_coding_services.step",
+            "Initialize Coding Services emitted a startup step.",
+            new Dictionary<string, string>
+            {
+                ["stepName"] = step.Name,
+                ["stepDetail"] = step.Detail,
+                ["repositoryRoot"] = repositoryRoot,
+                ["settingsPath"] = settingsPath
+            });
+    }
+
+    private sealed class AttachedMcpSessionHostController : ICodingServicesSessionHostController
+    {
+        public Task<CodingServicesHostCommandResult> ActivateNativeMountedServerAsync(string serverName, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(CodingServicesHostCommandResult.Success(
+                $"Initialize Coding Services is already executing through '{serverName}', so no additional host activation was required."));
+        }
+
+        public Task<CodingServicesNativeMountResult> GetNativeMountStatusAsync(string serverName, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CodingServicesNativeMountResult(
+                CodingServicesNativeMountState.Visible,
+                $"Initialize Coding Services is already executing through the live '{serverName}' MCP route."));
+        }
+
+        public Task<CodingServicesHostCommandResult> ResetThreadAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(CodingServicesHostCommandResult.Unsupported(
+                "Thread reset cannot be issued from inside the MCP server process. Reconnect/remount from the host if this session disappears."));
+        }
     }
 }
 

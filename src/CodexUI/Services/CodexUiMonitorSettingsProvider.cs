@@ -19,13 +19,17 @@ public sealed class CodexUiMonitorSettingsProvider : ICodexUiMonitorSettingsProv
         string repositoryRoot = ResolveRepositoryRoot();
         string watchedSolutionPath = RequireConfigurationValue("Monitor:WatchedSolutionPath");
         string runtimeRoot = configuration["Monitor:RuntimeRoot"] ?? "runtime";
+        string defaultReviewSurface = configuration["Monitor:DefaultReviewSurface"] ?? "Browser";
+        string browserReviewBaseUrl = configuration["Monitor:BrowserReviewBaseUrl"] ?? "http://localhost:5000";
         IReadOnlyList<string> winMergeCandidatePaths = LoadWinMergeCandidatePaths();
 
         return MonitorSettings.Create(
             repositoryRoot,
             ResolvePath(watchedSolutionPath, Directory.GetCurrentDirectory()),
             ResolvePath(runtimeRoot, repositoryRoot),
-            winMergeCandidatePaths);
+            winMergeCandidatePaths,
+            defaultReviewSurface,
+            browserReviewBaseUrl);
     }
 
     public string GetSettingsPath()

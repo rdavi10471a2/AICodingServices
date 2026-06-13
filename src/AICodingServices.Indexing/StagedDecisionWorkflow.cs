@@ -115,6 +115,11 @@ public sealed class StagedDecisionWorkflow
             return "Decision recorded. Index refresh is deferred until all declared session edit files are decided.";
         }
 
+        if (indexRefresh?.Status.Equals("skipped", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "Decision recorded. Index refresh was skipped because the accepted file set contains no indexed source files. Run edit refresh before further edits to this watched file.";
+        }
+
         return record.Classification is "accepted" or "accepted-normalized"
             ? "Index was rebuilt after accept. Run edit refresh before further edits to this watched file."
             : "Decision recorded. Do not rely on changed index rows unless an accepted decision rebuilt the index.";

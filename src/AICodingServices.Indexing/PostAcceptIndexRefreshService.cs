@@ -21,6 +21,37 @@ public sealed class PostAcceptIndexRefreshService
         string[] projectPaths = GetProjectRefreshPaths(record, refreshPlan);
         string[] filePaths = GetFileRefreshPaths(record, refreshPlan);
         bool useFileRefresh = projectPaths.Length == 1 && filePaths.Length > 0;
+        if (filePaths.Length == 0 && AllRefreshTargetsAreNonIndexedAssets(record, refreshPlan))
+        {
+            stopwatch.Stop();
+            PostAcceptIndexRefreshResult result = new()
+            {
+                Status = "skipped",
+                RefreshMode = "non-indexed-assets",
+                IsError = false,
+                DatabasePath = databasePath,
+                DurationMs = stopwatch.ElapsedMilliseconds,
+                Message = "Post-accept index refresh skipped because the accepted file set contains no indexed source files."
+            };
+            MarkRefreshFilesFresh(settings, record, filePaths, rebuiltWholeProjectOrSolution: true, refreshPlan);
+            logger.Write(
+                MonitorLogLevel.Information,
+                source,
+                "index.refresh-after-accept.skipped",
+                result.Message,
+                new Dictionary<string, string>
+                {
+                    ["stagedRecordId"] = record.StagedRecordId,
+                    ["watchedFilePath"] = record.WatchedFilePath,
+                    ["databasePath"] = databasePath,
+                    ["durationMs"] = result.DurationMs.ToString(),
+                    ["isError"] = "false",
+                    ["refreshMode"] = result.RefreshMode,
+                    ["projectPaths"] = string.Join(";", projectPaths),
+                    ["filePaths"] = string.Join(";", filePaths)
+                });
+            return result;
+        }
 
         // Schema-versioned rebuild gate: if the index was opened against a db whose persisted PRAGMA user_version did
         // not match SolutionIndexDatabase.SchemaVersion, EnsureCreated dropped ALL index tables, recreated the full
@@ -48,6 +79,7 @@ public sealed class PostAcceptIndexRefreshService
                 useFileRefresh = false;
             }
         }
+
 
         string refreshMode = useFileRefresh ? "project" : "solution";
         logger.Write(
@@ -221,6 +253,34 @@ public sealed class PostAcceptIndexRefreshService
             RefreshMode = "session-deferred",
             Message = "Index refresh deferred until all planned session edit files have terminal decisions."
         };
+    }
+
+    private static bool AllRefreshTargetsAreNonIndexedAssets(
+        StagedEditRecord record,
+        PostAcceptIndexRefreshPlan? refreshPlan)
+    {
+        string[] changedPaths = refreshPlan?.ChangedFilePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToArray() ?? [];
+        if (changedPaths.Length == 0)
+        {
+            changedPaths = [record.WatchedFilePath];
+        }
+
+        return changedPaths.All(IsNonIndexedAssetPath);
+    }
+
+    private static bool IsNonIndexedAssetPath(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".css", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".ico", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".svg", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] GetProjectRefreshPaths(

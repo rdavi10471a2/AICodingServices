@@ -1,0 +1,342 @@
+@page "/review/staged-demo"
+@page "/review/staged/{StagedRecordId}"
+@page "/review/session/{SessionId}"
+@rendermode InteractiveServer
+@using DiffPlex
+@using DiffPlex.DiffBuilder
+@using DiffPlex.DiffBuilder.Model
+@using Microsoft.AspNetCore.Components
+@inject StagedReviewPageService ReviewService
+
+<PageTitle>@pageTitle</PageTitle>
+
+<section class="review-page">
+    <header class="review-header">
+        <div>
+            <h1>@pageTitle</h1>
+            <p>@reviewPath</p>
+        </div>
+        <div class="review-actions" aria-label="Review actions">
+            <button class="secondary-action" type="button" @onclick="RefreshReview">Refresh</button>
+            <button class="reject-action" type="button" @onclick="RejectReview" disabled="@reviewActionsDisabled">Reject</button>
+            <button class="primary-action" type="button" @onclick="AcceptReview" disabled="@reviewActionsDisabled">Accept Proposed</button>
+        </div>
+    </header>
+
+    <section class="review-status" aria-live="polite">
+        <div>
+            <span>Mode</span>
+            <strong>@modeLabel</strong>
+        </div>
+        <div class="review-convention">
+            <span>Convention</span>
+            <strong>@conventionLabel</strong>
+        </div>
+        <div>
+            <span>Decision</span>
+            <strong>@decisionStatus</strong>
+        </div>
+        <div>
+            <span>Diff Engine</span>
+            <strong>@diffEngineLabel</strong>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(actionMessage))
+    {
+        <p class="review-message">@actionMessage</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(loadError))
+    {
+        <p class="review-error">@loadError</p>
+    }
+
+    <p class="merge-note">
+        @reviewNote
+    </p>
+
+    <section class="diff-shell" aria-label="Side by side staged review">
+        <div class="diff-header proposed-header">
+            <strong>Proposed Candidate</strong>
+        </div>
+        <div class="diff-header current-header">
+            <strong>Current Source</strong>
+        </div>
+
+        @for (int index = 0; index < LineCount; index++)
+        {
+            DiffPiece? proposedLine = GetProposedLine(index);
+            DiffPiece? currentLine = GetCurrentLine(index);
+
+            <div class="diff-line proposed @GetLineClass(proposedLine)">
+                <span class="line-number">@GetLineNumber(proposedLine)</span>
+                <code>@GetLineText(proposedLine)</code>
+            </div>
+            <div class="diff-line current @GetLineClass(currentLine)">
+                <span class="line-number">@GetLineNumber(currentLine)</span>
+                <code>@GetLineText(currentLine)</code>
+            </div>
+        }
+    </section>
+</section>
+
+@code {
+    private const string demoPath = "src/Example/OrderWorkflow.cs";
+
+    private const string demoCurrentText = "namespace Example;\n\npublic sealed class OrderWorkflow\n{\n    public string Start(string customerName)\n    {\n        if (string.IsNullOrWhiteSpace(customerName))\n        {\n            return \"Missing customer\";\n        }\n\n        return $\"Started order for {customerName}\";\n    }\n}\n";
+
+    private const string demoProposedText = "namespace Example;\n\npublic sealed class OrderWorkflow\n{\n    public string Start(string customerName)\n    {\n        if (string.IsNullOrWhiteSpace(customerName))\n        {\n            return \"Customer name is required\";\n        }\n\n        string normalizedName = customerName.Trim();\n        return $\"Started staged order for {normalizedName}\";\n    }\n}\n";
+
+    [Parameter]
+    public string? StagedRecordId { get; set; }
+
+    [Parameter]
+    public string? SessionId { get; set; }
+
+    private SideBySideDiffModel diffModel = default!;
+    private string currentText = demoCurrentText;
+    private string proposedText = demoProposedText;
+    private string reviewPath = demoPath;
+    private string pageTitle = "Staged Review Demo";
+    private string modeLabel = "Demo only";
+    private string conventionLabel = "Accept applies the proposed candidate into current source.";
+    private string decisionStatus = "Pending review";
+    private string diffEngineLabel = "DiffPlex";
+    private string reviewNote = "Left is proposed/staged. Right is current watched source. Demo data only; workflow writes are not connected yet.";
+    private string actionMessage = string.Empty;
+    private string loadError = string.Empty;
+    private string activeStagedRecordId = string.Empty;
+    private bool reviewActionsDisabled;
+
+    private int LineCount => Math.Max(diffModel.NewText.Lines.Count, diffModel.OldText.Lines.Count);
+
+    protected override void OnParametersSet()
+    {
+        LoadReview();
+    }
+
+    private void LoadReview()
+    {
+        actionMessage = string.Empty;
+        loadError = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(SessionId))
+        {
+            LoadSessionReview();
+            BuildDiff();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(StagedRecordId))
+        {
+            LoadDemoReview();
+            BuildDiff();
+            return;
+        }
+
+        try
+        {
+            StagedReviewPageModel model = ReviewService.Load(StagedRecordId);
+            ApplyModel(model, isSessionMode: false);
+        }
+        catch (Exception ex)
+        {
+            ApplyLoadError("Staged record", StagedRecordId, ex.Message);
+        }
+
+        BuildDiff();
+    }
+
+    private void LoadSessionReview()
+    {
+        try
+        {
+            StagedReviewPageModel model = ReviewService.LoadNextForSession(SessionId!);
+            ApplyModel(model, isSessionMode: true);
+        }
+        catch (Exception ex)
+        {
+            ApplyLoadError("Review session", SessionId, ex.Message);
+        }
+    }
+
+    private void LoadDemoReview()
+    {
+        pageTitle = "Staged Review Demo";
+        modeLabel = "Demo only";
+        conventionLabel = "Accept applies the proposed candidate into current source.";
+        reviewPath = demoPath;
+        currentText = demoCurrentText;
+        proposedText = demoProposedText;
+        activeStagedRecordId = string.Empty;
+        decisionStatus = "Pending review";
+        reviewActionsDisabled = false;
+        reviewNote = "Left is proposed/staged. Right is current watched source. Demo data only; workflow writes are not connected yet.";
+    }
+
+    private void ApplyModel(StagedReviewPageModel model, bool isSessionMode)
+    {
+        pageTitle = isSessionMode ? "Staged Review Session" : "Staged Review";
+        modeLabel = GetModeLabel(model, isSessionMode);
+        conventionLabel = isSessionMode
+            ? "Accept or reject advances this review window to the next pending staged record."
+            : "Accept applies the proposed candidate into current source.";
+        reviewPath = model.RelativePath;
+        currentText = model.CurrentText;
+        proposedText = model.ProposedText;
+        activeStagedRecordId = model.StagedRecordId;
+        decisionStatus = model.DecisionStatus;
+        reviewActionsDisabled = model.IsDecided || model.IsSessionComplete || string.IsNullOrWhiteSpace(model.StagedRecordId);
+        reviewNote = model.IsSessionComplete
+            ? "No pending staged records remain in this review session."
+            : "Left is the immutable proposed staged candidate. Right is the current watched source. Accept writes left into right and records the workflow decision.";
+    }
+
+    private void ApplyLoadError(string mode, string? path, string message)
+    {
+        pageTitle = "Staged Review";
+        modeLabel = mode;
+        conventionLabel = "Accept applies the proposed candidate into current source.";
+        reviewPath = path ?? string.Empty;
+        currentText = string.Empty;
+        proposedText = string.Empty;
+        activeStagedRecordId = string.Empty;
+        decisionStatus = "Unavailable";
+        reviewActionsDisabled = true;
+        reviewNote = "Left is proposed/staged. Right is current watched source.";
+        loadError = message;
+    }
+
+    private void AcceptReview()
+    {
+        if (string.IsNullOrWhiteSpace(activeStagedRecordId))
+        {
+            decisionStatus = string.IsNullOrWhiteSpace(SessionId) ? "Accepted locally" : decisionStatus;
+            return;
+        }
+
+        RunAction(() => ReviewService.Accept(activeStagedRecordId));
+    }
+
+    private void RejectReview()
+    {
+        if (string.IsNullOrWhiteSpace(activeStagedRecordId))
+        {
+            decisionStatus = string.IsNullOrWhiteSpace(SessionId) ? "Rejected locally" : decisionStatus;
+            return;
+        }
+
+        RunAction(() => ReviewService.Reject(activeStagedRecordId));
+    }
+
+    private void RefreshReview()
+    {
+        LoadReview();
+    }
+
+    private void RunAction(Func<StagedReviewPageActionResult> action)
+    {
+        try
+        {
+            StagedReviewPageActionResult result = action();
+            string message = result.Message;
+            loadError = string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(SessionId))
+            {
+                LoadSessionReview();
+                actionMessage = message;
+            }
+            else
+            {
+                ApplyModel(result.Model, isSessionMode: false);
+                actionMessage = message;
+            }
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+
+        BuildDiff();
+    }
+
+    private void BuildDiff()
+    {
+        SideBySideDiffBuilder builder = new SideBySideDiffBuilder(new Differ());
+        diffModel = builder.BuildDiffModel(currentText, proposedText);
+    }
+
+    private DiffPiece? GetProposedLine(int index)
+    {
+        if (index >= diffModel.NewText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.NewText.Lines[index];
+    }
+
+    private DiffPiece? GetCurrentLine(int index)
+    {
+        if (index >= diffModel.OldText.Lines.Count)
+        {
+            return null;
+        }
+
+        return diffModel.OldText.Lines[index];
+    }
+
+    private static string GetLineNumber(DiffPiece? piece)
+    {
+        if (piece is null || piece.Position is null)
+        {
+            return string.Empty;
+        }
+
+        return piece.Position.Value.ToString();
+    }
+
+    private static string GetLineText(DiffPiece? piece)
+    {
+        if (piece is null)
+        {
+            return string.Empty;
+        }
+
+        return piece.Text;
+    }
+
+    private static string GetLineClass(DiffPiece? piece)
+    {
+        if (piece is null)
+        {
+            return "imaginary";
+        }
+
+        return piece.Type switch
+        {
+            ChangeType.Inserted => "inserted",
+            ChangeType.Deleted => "deleted",
+            ChangeType.Modified => "modified",
+            ChangeType.Imaginary => "imaginary",
+            _ => "unchanged"
+        };
+    }
+
+    private static string GetModeLabel(StagedReviewPageModel model, bool isSessionMode)
+    {
+        if (model.IsSessionComplete)
+        {
+            return "Review session";
+        }
+
+        if (isSessionMode)
+        {
+            return model.IsNewFile ? "Session new file" : "Session staged record";
+        }
+
+        return model.IsNewFile ? "New staged file" : "Staged record";
+    }
+}

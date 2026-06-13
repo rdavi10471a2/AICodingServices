@@ -38,15 +38,15 @@ body {
     min-width: 170px;
 }
 
-.brand-mark {
-    display: inline-grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
+.brand-logo {
+    background: #071827;
+    border: 1px solid rgba(93, 220, 235, 0.55);
     border-radius: 6px;
-    background: #4fb286;
-    color: #07120d;
-    font-weight: 700;
+    display: block;
+    height: 34px;
+    object-fit: cover;
+    object-position: center;
+    width: 34px;
 }
 
 .brand-name {
@@ -362,6 +362,49 @@ h2 {
     margin: 0;
     max-width: none;
     min-height: 720px;
+}
+
+.source-page .page-header h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0;
+}
+
+.source-page .page-subtitle {
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+.source-page .panel-heading h2,
+.source-page .source-toolbar h2,
+.source-page .empty-state h2,
+.source-page .reference-panel h2 {
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.source-page .panel-heading span,
+.source-page .source-toolbar strong,
+.source-page .reference-panel p,
+.source-page .empty-state p {
+    font-size: 0.78rem;
+    line-height: 1.25;
+}
+
+.source-page .tree-folder-label,
+.source-page .source-file-link,
+.source-page .outline-link {
+    font-size: 0.78rem;
+}
+
+.source-page .tree-symbol-branch > summary .tree-folder-label,
+.source-page .tree-symbol-group > summary .tree-folder-label,
+.source-page .outline-link small {
+    font-size: 0.72rem;
 }
 
 .page-title-row {

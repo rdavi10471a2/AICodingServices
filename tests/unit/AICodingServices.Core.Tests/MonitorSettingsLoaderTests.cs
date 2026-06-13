@@ -18,6 +18,8 @@ public sealed class MonitorSettingsLoaderTests
               "Monitor": {
                 "WatchedSolutionPath": "{{solutionPath.Replace("\\", "\\\\")}}",
                 "RuntimeRoot": "runtime",
+                "DefaultReviewSurface": "WinMerge",
+                "BrowserReviewBaseUrl": "http://localhost:6000",
                 "WinMergeCandidatePaths": [
                   "tools/WinMergeU.exe"
                 ]
@@ -29,6 +31,8 @@ public sealed class MonitorSettingsLoaderTests
 
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(root, "runtime"), settings.RuntimeRoot);
+        Assert.Equal("WinMerge", settings.DefaultReviewSurface);
+        Assert.Equal("http://localhost:6000", settings.BrowserReviewBaseUrl);
         Assert.Equal(Path.Combine(config, "tools", "WinMergeU.exe"), Assert.Single(settings.WinMergeCandidatePaths));
     }
 
@@ -82,6 +86,8 @@ public sealed class MonitorSettingsLoaderTests
               "Monitor": {
                 "WatchedSolutionPath": "old.sln",
                 "RuntimeRoot": "runtime",
+                "DefaultReviewSurface": "WinMerge",
+                "BrowserReviewBaseUrl": "http://localhost:6000",
                 "WinMergeCandidatePaths": [
                   "C:\\Tools\\WinMerge\\WinMergeU.exe"
                 ]
@@ -95,6 +101,8 @@ public sealed class MonitorSettingsLoaderTests
         Assert.Equal(Path.Combine(root, "config", "appsettings.json"), settingsPath);
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(root, "runtime"), settings.RuntimeRoot);
+        Assert.Equal("WinMerge", settings.DefaultReviewSurface);
+        Assert.Equal("http://localhost:6000", settings.BrowserReviewBaseUrl);
         Assert.Equal(@"C:\Tools\WinMerge\WinMergeU.exe", Assert.Single(settings.WinMergeCandidatePaths));
     }
 
@@ -136,5 +144,7 @@ public sealed class MonitorSettingsLoaderTests
         Assert.Equal(
             new[] { "C:\\Program Files\\WinMerge\\WinMergeU.exe", "C:\\Program Files (x86)\\WinMerge\\WinMergeU.exe" },
             settings.WinMergeCandidatePaths);
+        Assert.Equal("Browser", settings.DefaultReviewSurface);
+        Assert.Equal("http://localhost:5000", settings.BrowserReviewBaseUrl);
     }
 }
