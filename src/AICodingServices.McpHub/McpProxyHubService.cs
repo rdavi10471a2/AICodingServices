@@ -20,15 +20,17 @@ public sealed class McpProxyHubService : IDisposable
 
     private readonly MonitorSettings settings;
     private readonly IMonitorLogger logger;
+    private readonly IMcpTelemetrySink telemetrySink;
     private readonly string settingsPath;
     private readonly string pipeName;
     private readonly CancellationTokenSource shutdown = new();
     private readonly Task acceptLoop;
 
-    public McpProxyHubService(MonitorSettings settings, IMonitorLogger logger, string settingsPath)
+    public McpProxyHubService(MonitorSettings settings, IMonitorLogger logger, string settingsPath, IMcpTelemetrySink? telemetrySink = null)
     {
         this.settings = settings;
         this.logger = logger;
+        this.telemetrySink = telemetrySink ?? NullMcpTelemetrySink.Instance;
         this.settingsPath = Path.GetFullPath(settingsPath);
         pipeName = MonitorMcpProxyPipeNames.GetDefaultPipeName(settings);
         acceptLoop = Task.Run(() => AcceptLoopAsync(shutdown.Token));
@@ -182,12 +184,19 @@ public sealed class McpProxyHubService : IDisposable
 
             if (McpTrafficLogPolicy.ShouldLogTraffic(metadata.Method, metadata.ToolName))
             {
+                Dictionary<string, string> properties = BuildRequestProperties(sessionId, metadata, line);
+                telemetrySink.Record(new McpTelemetryEvent(
+                    DateTimeOffset.UtcNow,
+                    MonitorLogLevel.Information,
+                    "adapter.mcp.request.started",
+                    "MCP proxy hub forwarded a request to AICodingServices server.",
+                    new Dictionary<string, string>(properties, StringComparer.Ordinal)));
                 logger.Write(
                     MonitorLogLevel.Information,
                     "AICodingServices.McpProxyHub",
                     "adapter.mcp.request.started",
                     "MCP proxy hub forwarded a request to AICodingServices server.",
-                    BuildRequestProperties(sessionId, metadata, line));
+                    properties);
             }
 
             await child.StandardInput.WriteLineAsync(line);
@@ -221,12 +230,19 @@ public sealed class McpProxyHubService : IDisposable
 
             if (McpTrafficLogPolicy.ShouldLogTraffic(metadata.Method, metadata.ToolName))
             {
+                Dictionary<string, string> properties = BuildResponseProperties(sessionId, metadata, request, line, durationMs);
+                telemetrySink.Record(new McpTelemetryEvent(
+                    DateTimeOffset.UtcNow,
+                    MonitorLogLevel.Information,
+                    "adapter.mcp.request.completed",
+                    "MCP proxy hub received a response from AICodingServices server.",
+                    new Dictionary<string, string>(properties, StringComparer.Ordinal)));
                 logger.Write(
                     MonitorLogLevel.Information,
                     "AICodingServices.McpProxyHub",
                     "adapter.mcp.request.completed",
                     "MCP proxy hub received a response from AICodingServices server.",
-                    BuildResponseProperties(sessionId, metadata, request, line, durationMs));
+                    properties);
             }
 
             await clientWriter.WriteLineAsync(line);

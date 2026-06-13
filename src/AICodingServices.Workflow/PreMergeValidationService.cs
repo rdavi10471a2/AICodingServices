@@ -6,6 +6,7 @@ namespace AICodingServices.Workflow;
 
 public sealed class PreMergeValidationService
 {
+    private const string DisableDefaultScopedCssItemsProperty = "/p:EnableDefaultScopedCssItems=false";
     public PreMergeValidationResult ValidateStagedOverlay(
         StagedEditRecord record,
         IReadOnlyList<StagedEditRecord> stagedOverlayRecords)
@@ -67,49 +68,54 @@ public sealed class PreMergeValidationService
             "validation",
             $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssfff}-{Guid.NewGuid():N}"[..42]);
         string sourceRoot = settings.WatchedProjectFolder;
-        IReadOnlyList<string> excludedRoots = [settings.RuntimeRoot, validationWorkspaceRoot];
-        ExternalValidationInputs externalInputs = CollectExternalValidationInputs(sourceRoot, excludedRoots);
-        string validationSourceRoot = Path.Combine(
-            validationWorkspaceRoot,
-            Path.GetRelativePath(externalInputs.CommonRoot, sourceRoot));
-        string validationSolutionPath = Path.Combine(validationSourceRoot, Path.GetRelativePath(sourceRoot, settings.WatchedSolutionPath));
         try
         {
-            CopyDirectoryForValidation(sourceRoot, validationSourceRoot, excludedRoots);
-            CopyExternalValidationInputs(externalInputs, validationWorkspaceRoot, excludedRoots);
-
-            foreach (StagedEditRecord overlayRecord in overlayRecords)
+            Directory.CreateDirectory(validationWorkspaceRoot);
+            string overlayRoot = Path.Combine(validationWorkspaceRoot, "overlay");
+            string artifactsPath = Path.Combine(validationWorkspaceRoot, "artifacts");
+            string overlayTargetsPath = Path.Combine(validationWorkspaceRoot, "Overlay.targets");
+            string[] projectPaths = ResolveValidationProjectPaths(settings.WatchedSolutionPath, sourceRoot);
+            OverlayItem[] overlayItems = CreateOverlayItems(overlayRecords, projectPaths, overlayRoot);
+            if (overlayItems.Length == 0)
             {
-                string validationCandidatePath = Path.Combine(validationSourceRoot, overlayRecord.RelativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(validationCandidatePath) ?? validationSourceRoot);
-                File.Copy(overlayRecord.StagedFilePath, validationCandidatePath, overwrite: true);
+                return new PreMergeValidationResult
+                {
+                    Status = "passed",
+                    IsError = false,
+                    DiagnosticCount = 0,
+                    Diagnostics = [],
+                    ValidationWorkspacePath = validationWorkspaceRoot,
+                    Message = overlayRecords.Length <= 1
+                        ? "Pre-merge single-file validation skipped because no MSBuild item owns the staged file."
+                        : $"Pre-merge session overlay validation skipped because no MSBuild item owns the {overlayRecords.Length} staged files."
+                };
             }
 
-            ProcessResult build = RunProcess(
-                "dotnet",
-                ["build", validationSolutionPath, "--nologo", "-v:minimal"],
-                validationWorkspaceRoot,
-                TimeSpan.FromMinutes(3));
-            string output = string.Join(Environment.NewLine, [build.StandardOutput, build.StandardError]);
-            string[] errorDiagnostics = ExtractBuildErrors(output);
-            bool failed = build.TimedOut || build.ExitCode != 0;
-            if (failed && errorDiagnostics.Length == 0)
+            WriteOverlayTargets(overlayTargetsPath, overlayItems);
+            string[] buildTargets = overlayItems
+                .Select(item => item.ProjectPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            ValidationBuildResult build = RunValidationBuilds(buildTargets, sourceRoot, artifactsPath, overlayTargetsPath);
+            string[] errorDiagnostics = ExtractBuildErrors(build.Output);
+            if (build.Failed && errorDiagnostics.Length == 0)
             {
                 errorDiagnostics = [$"dotnet build exited with code {build.ExitCode} but did not emit parseable error diagnostics."];
             }
 
             return new PreMergeValidationResult
             {
-                Status = build.TimedOut ? "timeout" : failed ? "failed" : "passed",
-                IsError = failed,
+                Status = build.TimedOut ? "timeout" : build.Failed ? "failed" : "passed",
+                IsError = build.Failed,
                 DiagnosticCount = errorDiagnostics.Length,
                 Diagnostics = errorDiagnostics,
                 ValidationWorkspacePath = validationWorkspaceRoot,
                 Message = build.TimedOut
-                    ? CreateValidationMessage("timed out", overlayRecords.Length)
-                    : failed
-                        ? CreateValidationMessage("failed", overlayRecords.Length)
-                        : CreateValidationMessage("passed", overlayRecords.Length)
+                    ? CreateValidationMessage("timed out", overlayRecords.Length, buildTargets.Length)
+                    : build.Failed
+                        ? CreateValidationMessage("failed", overlayRecords.Length, buildTargets.Length)
+                        : CreateValidationMessage("passed", overlayRecords.Length, buildTargets.Length)
             };
         }
         catch (Exception ex)
@@ -173,249 +179,253 @@ public sealed class PreMergeValidationService
         return null;
     }
 
-    private static string CreateValidationMessage(string outcome, int overlayFileCount)
+    private static string CreateValidationMessage(string outcome, int overlayFileCount, int buildTargetCount = 1)
     {
+        string targetLabel = buildTargetCount == 1 ? "real-tree overlay project build" : $"{buildTargetCount} real-tree overlay project builds";
         if (overlayFileCount <= 1)
         {
-            return $"Pre-merge single-file full solution build {outcome}.";
+            return $"Pre-merge single-file {targetLabel} {outcome}.";
         }
 
-        return $"Pre-merge session overlay full solution build {outcome} with {overlayFileCount} staged files.";
+        return $"Pre-merge session overlay {targetLabel} {outcome} with {overlayFileCount} staged files.";
     }
 
-    private static ExternalValidationInputs CollectExternalValidationInputs(string sourceRoot, IReadOnlyList<string> excludedRoots)
+    private static ValidationBuildResult RunValidationBuilds(
+        string[] buildTargets,
+        string sourceRoot,
+        string artifactsPath,
+        string overlayTargetsPath)
     {
-        HashSet<string> projectFiles = new(StringComparer.OrdinalIgnoreCase);
-        Queue<string> pendingProjects = new();
-        foreach (string projectFile in EnumerateProjectFiles(sourceRoot, excludedRoots))
+        List<string> outputBlocks = [];
+        int lastExitCode = 0;
+        bool timedOut = false;
+        foreach (string buildTarget in buildTargets)
         {
-            projectFiles.Add(Path.GetFullPath(projectFile));
-            pendingProjects.Enqueue(Path.GetFullPath(projectFile));
-        }
-
-        HashSet<string> externalDirectories = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> externalFiles = new(StringComparer.OrdinalIgnoreCase);
-        AddBuildFilesFromDirectoryAndParents(sourceRoot, sourceRoot, externalFiles);
-
-        while (pendingProjects.Count > 0)
-        {
-            string projectFile = pendingProjects.Dequeue();
-            string projectDirectory = Path.GetDirectoryName(projectFile) ?? sourceRoot;
-            AddBuildFilesFromDirectoryAndParents(projectDirectory, sourceRoot, externalFiles);
-
-            foreach (string referencedProject in ReadProjectReferences(projectFile))
+            ProcessResult restore = RunProcess(
+                "dotnet",
+                [
+                    "restore",
+                    buildTarget,
+                    "--artifacts-path",
+                    artifactsPath,
+                    "/p:NuGetAudit=false",
+                    DisableDefaultScopedCssItemsProperty,
+                    $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
+                ],
+                sourceRoot,
+                TimeSpan.FromMinutes(3));
+            lastExitCode = restore.ExitCode;
+            timedOut = timedOut || restore.TimedOut;
+            outputBlocks.Add(restore.StandardOutput);
+            outputBlocks.Add(restore.StandardError);
+            if (restore.TimedOut || restore.ExitCode != 0)
             {
-                if (!File.Exists(referencedProject))
-                {
-                    continue;
-                }
-
-                string fullReferencedProject = Path.GetFullPath(referencedProject);
-                if (projectFiles.Add(fullReferencedProject))
-                {
-                    pendingProjects.Enqueue(fullReferencedProject);
-                }
-
-                string referencedDirectory = Path.GetDirectoryName(fullReferencedProject) ?? projectDirectory;
-                if (!IsPathUnderAny(referencedDirectory, [sourceRoot]))
-                {
-                    externalDirectories.Add(referencedDirectory);
-                }
+                break;
             }
 
-            foreach (string importFile in ReadImportFiles(projectFile))
+            ProcessResult build = RunProcess(
+                "dotnet",
+                [
+                    "build",
+                    buildTarget,
+                    "--no-restore",
+                    "--nologo",
+                    "-v:minimal",
+                    "--artifacts-path",
+                    artifactsPath,
+                    "/p:UseAppHost=false",
+                    "/p:NuGetAudit=false",
+                    DisableDefaultScopedCssItemsProperty,
+                    $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
+                ],
+                sourceRoot,
+                TimeSpan.FromMinutes(3));
+            lastExitCode = build.ExitCode;
+            timedOut = timedOut || build.TimedOut;
+            outputBlocks.Add(build.StandardOutput);
+            outputBlocks.Add(build.StandardError);
+            if (build.TimedOut || build.ExitCode != 0)
             {
-                if (File.Exists(importFile) && !IsPathUnderAny(importFile, [sourceRoot]))
-                {
-                    externalFiles.Add(Path.GetFullPath(importFile));
-                }
+                break;
             }
         }
 
-        string commonRoot = GetCommonRoot(
-            [sourceRoot, .. externalDirectories, .. externalFiles.Select(path => Path.GetDirectoryName(path) ?? sourceRoot)]);
-        return new ExternalValidationInputs(commonRoot, externalDirectories.ToArray(), externalFiles.ToArray());
+        return new ValidationBuildResult(
+            lastExitCode,
+            timedOut,
+            timedOut || lastExitCode != 0,
+            string.Join(Environment.NewLine, outputBlocks));
     }
 
-    private static IEnumerable<string> EnumerateProjectFiles(string root, IReadOnlyList<string> excludedRoots)
+    private static string[] ResolveValidationProjectPaths(string watchedSolutionPath, string sourceRoot)
     {
-        foreach (string file in Directory.EnumerateFiles(root, "*.*proj", SearchOption.AllDirectories))
+        string extension = Path.GetExtension(watchedSolutionPath);
+        if (extension.EndsWith("proj", StringComparison.OrdinalIgnoreCase))
         {
-            if (IsPathUnderAny(file, excludedRoots)
-                || file.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(IsSkippedValidationDirectory))
+            return [Path.GetFullPath(watchedSolutionPath)];
+        }
+
+        string[] projectPaths = ReadSlnxProjectPaths(watchedSolutionPath)
+            .Select(path => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(watchedSolutionPath) ?? sourceRoot, path)))
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (projectPaths.Length > 0)
+        {
+            return projectPaths;
+        }
+
+        return Directory.EnumerateFiles(sourceRoot, "*.*proj", SearchOption.AllDirectories)
+            .Where(path => !path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(IsSkippedValidationDirectory))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static OverlayItem[] CreateOverlayItems(
+        StagedEditRecord[] overlayRecords,
+        IReadOnlyList<string> projectPaths,
+        string overlayRoot)
+    {
+        List<OverlayItem> items = [];
+        foreach (StagedEditRecord record in overlayRecords)
+        {
+            string watchedPath = Path.GetFullPath(record.WatchedFilePath);
+            string? itemType = DetermineOverlayItemType(watchedPath);
+            if (itemType is null)
             {
                 continue;
             }
 
-            yield return file;
+            string? projectPath = FindContainingProject(watchedPath, projectPaths);
+            if (projectPath is null)
+            {
+                continue;
+            }
+
+            string overlayPath = Path.GetFullPath(Path.Combine(overlayRoot, record.RelativePath));
+            Directory.CreateDirectory(Path.GetDirectoryName(overlayPath) ?? overlayRoot);
+            File.Copy(record.StagedFilePath, overlayPath, overwrite: true);
+            string projectDirectory = Path.GetDirectoryName(projectPath) ?? Directory.GetCurrentDirectory();
+            string linkPath = Path.GetRelativePath(projectDirectory, watchedPath);
+            items.Add(new OverlayItem(projectPath, watchedPath, overlayPath, itemType, linkPath));
         }
+
+        return items.ToArray();
     }
 
-    private static void AddBuildFilesFromDirectoryAndParents(string startDirectory, string sourceRoot, HashSet<string> externalFiles)
+    private static string? DetermineOverlayItemType(string watchedPath)
     {
-        string[] fileNames =
+        string fileName = Path.GetFileName(watchedPath);
+        string extension = Path.GetExtension(watchedPath);
+        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Compile";
+        }
+
+        if (extension.Equals(".resx", StringComparison.OrdinalIgnoreCase))
+        {
+            return "EmbeddedResource";
+        }
+
+        if (fileName.EndsWith(".razor.css", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".razor", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cshtml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".css", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".json", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".html", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".htm", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".xml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".config", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Content";
+        }
+
+        if (extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return "Content";
+    }
+
+    private static void WriteOverlayTargets(string overlayTargetsPath, IReadOnlyList<OverlayItem> overlayItems)
+    {
+        string[] removableItemTypes =
         [
-            "Directory.Build.props",
-            "Directory.Build.targets",
-            "Directory.Packages.props",
-            "NuGet.config",
-            "global.json"
+            "Compile",
+            "Content",
+            "None",
+            "EmbeddedResource",
+            "AdditionalFiles",
+            "RazorComponent",
+            "RazorGenerate",
+            "UpToDateCheckInput"
         ];
-        DirectoryInfo? current = new(startDirectory);
-        while (current is not null)
+        XElement project = new("Project");
+        foreach (OverlayItem item in overlayItems)
         {
-            foreach (string fileName in fileNames)
+            XElement itemGroup = new(
+                "ItemGroup",
+                new XAttribute("Condition", $"'$(MSBuildProjectFullPath)' == '{item.ProjectPath}'"));
+            foreach (string itemType in removableItemTypes)
             {
-                string path = Path.Combine(current.FullName, fileName);
-                if (File.Exists(path) && !IsPathUnderAny(path, [sourceRoot]))
-                {
-                    externalFiles.Add(Path.GetFullPath(path));
-                }
+                itemGroup.Add(new XElement(itemType, new XAttribute("Remove", item.WatchedPath)));
             }
 
-            current = current.Parent;
+            itemGroup.Add(new XElement(
+                item.ItemType,
+                new XAttribute("Include", item.OverlayPath),
+                new XElement("Link", item.LinkPath)));
+            project.Add(itemGroup);
         }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(overlayTargetsPath) ?? Directory.GetCurrentDirectory());
+        XDocument document = new(new XDeclaration("1.0", "utf-8", null), project);
+        document.Save(overlayTargetsPath);
     }
 
-    private static IEnumerable<string> ReadProjectReferences(string projectFile)
-    {
-        foreach (XElement item in ReadProjectItems(projectFile, "ProjectReference"))
-        {
-            string? include = item.Attribute("Include")?.Value;
-            if (string.IsNullOrWhiteSpace(include))
-            {
-                continue;
-            }
-
-            yield return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(projectFile) ?? ".", include));
-        }
-    }
-
-    private static IEnumerable<string> ReadImportFiles(string projectFile)
-    {
-        foreach (XElement item in ReadProjectItems(projectFile, "Import"))
-        {
-            string? include = item.Attribute("Project")?.Value;
-            if (string.IsNullOrWhiteSpace(include)
-                || include.Contains('$', StringComparison.Ordinal)
-                || include.Contains('*', StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            yield return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(projectFile) ?? ".", include));
-        }
-    }
-
-    private static IEnumerable<XElement> ReadProjectItems(string projectFile, string localName)
+    private static IEnumerable<string> ReadSlnxProjectPaths(string solutionPath)
     {
         XDocument document;
         try
         {
-            document = XDocument.Load(projectFile);
+            document = XDocument.Load(solutionPath);
         }
         catch
         {
             yield break;
         }
 
-        foreach (XElement element in document.Descendants().Where(element => element.Name.LocalName.Equals(localName, StringComparison.OrdinalIgnoreCase)))
+        foreach (XElement project in document.Descendants().Where(element => element.Name.LocalName.Equals("Project", StringComparison.OrdinalIgnoreCase)))
         {
-            yield return element;
+            string? path = project.Attribute("Path")?.Value;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                yield return path;
+            }
         }
     }
 
-    private static void CopyExternalValidationInputs(
-        ExternalValidationInputs inputs,
-        string validationWorkspaceRoot,
-        IReadOnlyList<string> excludedRoots)
+    private static string? FindContainingProject(string filePath, IReadOnlyList<string> projectPaths)
     {
-        foreach (string directory in inputs.Directories)
+        string? bestProject = null;
+        int bestLength = -1;
+        foreach (string projectPath in projectPaths)
         {
-            string destination = MapValidationPath(inputs.CommonRoot, validationWorkspaceRoot, directory);
-            CopyDirectoryForValidation(directory, destination, [.. excludedRoots, validationWorkspaceRoot]);
-        }
-
-        foreach (string file in inputs.Files)
-        {
-            string destination = MapValidationPath(inputs.CommonRoot, validationWorkspaceRoot, file);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? validationWorkspaceRoot);
-            File.Copy(file, destination, overwrite: true);
-        }
-    }
-
-    private static string MapValidationPath(string commonRoot, string validationWorkspaceRoot, string sourcePath)
-    {
-        return Path.GetFullPath(Path.Combine(validationWorkspaceRoot, Path.GetRelativePath(commonRoot, sourcePath)));
-    }
-
-    private static string GetCommonRoot(IReadOnlyList<string> paths)
-    {
-        string common = Path.GetFullPath(paths[0]).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        foreach (string path in paths.Skip(1))
-        {
-            string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            while (!fullPath.Equals(common, StringComparison.OrdinalIgnoreCase)
-                && !fullPath.StartsWith(common + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                && !fullPath.StartsWith(common + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            string projectDirectory = Path.GetDirectoryName(projectPath) ?? string.Empty;
+            if (IsPathUnderAny(filePath, [projectDirectory]) && projectDirectory.Length > bestLength)
             {
-                common = Path.GetDirectoryName(common) ?? common;
+                bestProject = projectPath;
+                bestLength = projectDirectory.Length;
             }
         }
 
-        return common;
-    }
-
-    private static void CopyDirectoryForValidation(
-        string sourceRoot,
-        string destinationRoot,
-        IReadOnlyList<string> excludedRoots)
-    {
-        Directory.CreateDirectory(destinationRoot);
-        CopyDirectoryContentsForValidation(sourceRoot, sourceRoot, destinationRoot, excludedRoots);
-    }
-
-    private static void CopyDirectoryContentsForValidation(
-        string sourceRoot,
-        string currentRoot,
-        string destinationRoot,
-        IReadOnlyList<string> excludedRoots)
-    {
-        foreach (string directoryPath in Directory.EnumerateDirectories(currentRoot))
-        {
-            if (IsPathUnderAny(directoryPath, excludedRoots))
-            {
-                continue;
-            }
-
-            string directoryName = Path.GetFileName(directoryPath);
-            if (IsSkippedValidationDirectory(directoryName))
-            {
-                continue;
-            }
-
-            string relativePath = Path.GetRelativePath(sourceRoot, directoryPath);
-            Directory.CreateDirectory(Path.Combine(destinationRoot, relativePath));
-            CopyDirectoryContentsForValidation(sourceRoot, directoryPath, destinationRoot, excludedRoots);
-        }
-
-        foreach (string filePath in Directory.EnumerateFiles(currentRoot))
-        {
-            if (IsPathUnderAny(filePath, excludedRoots))
-            {
-                continue;
-            }
-
-            string relativePath = Path.GetRelativePath(sourceRoot, filePath);
-            if (relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(IsSkippedValidationDirectory))
-            {
-                continue;
-            }
-
-            string destinationPath = Path.Combine(destinationRoot, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationRoot);
-            File.Copy(filePath, destinationPath, overwrite: true);
-        }
+        return bestProject;
     }
 
     private static bool IsPathUnderAny(string path, IReadOnlyList<string> roots)
@@ -451,7 +461,8 @@ public sealed class PreMergeValidationService
             || directoryName.Equals("bin", StringComparison.OrdinalIgnoreCase)
             || directoryName.Equals("obj", StringComparison.OrdinalIgnoreCase)
             || directoryName.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
-            || directoryName.Equals("packages", StringComparison.OrdinalIgnoreCase);
+            || directoryName.Equals("packages", StringComparison.OrdinalIgnoreCase)
+            || directoryName.Equals("runtime", StringComparison.OrdinalIgnoreCase);
     }
 
     private static ProcessResult RunProcess(
@@ -460,39 +471,46 @@ public sealed class PreMergeValidationService
         string workingDirectory,
         TimeSpan timeout)
     {
-        using Process process = new();
-        process.StartInfo = new ProcessStartInfo(fileName)
+        Process process = new();
+        try
         {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false
-        };
-        foreach (string argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        process.Start();
-        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-        Task<string> standardError = process.StandardError.ReadToEndAsync();
-        bool exited = process.WaitForExit(timeout);
-        if (!exited)
-        {
-            try
+            process.StartInfo = new ProcessStartInfo(fileName)
             {
-                process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException)
+                WorkingDirectory = workingDirectory,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            foreach (string argument in arguments)
             {
+                process.StartInfo.ArgumentList.Add(argument);
             }
-        }
 
-        return new ProcessResult(
-            exited ? process.ExitCode : -1,
-            !exited,
-            standardOutput.GetAwaiter().GetResult(),
-            standardError.GetAwaiter().GetResult());
+            process.Start();
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
+            bool exited = process.WaitForExit(timeout);
+            if (!exited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+
+            return new ProcessResult(
+                exited ? process.ExitCode : -1,
+                !exited,
+                standardOutput.GetAwaiter().GetResult(),
+                standardError.GetAwaiter().GetResult());
+        }
+        finally
+        {
+            process.Dispose();
+        }
     }
 
     private static string[] ExtractBuildErrors(string output)
@@ -504,14 +522,22 @@ public sealed class PreMergeValidationService
             .ToArray();
     }
 
+    private sealed record OverlayItem(
+        string ProjectPath,
+        string WatchedPath,
+        string OverlayPath,
+        string ItemType,
+        string LinkPath);
+
     private sealed record ProcessResult(
         int ExitCode,
         bool TimedOut,
         string StandardOutput,
         string StandardError);
 
-    private sealed record ExternalValidationInputs(
-        string CommonRoot,
-        IReadOnlyList<string> Directories,
-        IReadOnlyList<string> Files);
+    private sealed record ValidationBuildResult(
+        int ExitCode,
+        bool TimedOut,
+        bool Failed,
+        string Output);
 }

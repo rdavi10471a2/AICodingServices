@@ -17,6 +17,7 @@ Use this file after context loss, plugin restarts, or MCP reconnects. Keep it cu
 - If native `aicodingservices` tools are not visible in the chat, do not assume the MCP is down. Check `codex mcp list` / `codex mcp get aicodingservices`; if the registration is enabled, retarget/reload the chat if possible.
 - If the chat still does not mount native tools, connect directly through `C:\VSCodeProjects\CodingServices\src\AICodingServices.McpStdioBridge\bin\Debug\net10.0\AICodingServices.McpStdioBridge.dll` and pass `--repo-root C:\VSCodeProjects\CodingServices --config C:\VSCodeProjects\CodingServices\config\appsettings.json`. Use raw byte MCP framing or a known-good client; PowerShell text writers can inject a BOM/prefix and break the frame.
 - CodingServices product edits should still go through the CodingServices watched-source workflow when CodingServices is the watched solution: Working candidate, staged review, WinMerge save, recorded decision, and index refresh.
+- Pre-merge validation uses real watched projects with isolated validation artifacts and disables default scoped CSS item discovery during predictive overlay builds so staged `.razor.css` runtime paths do not produce invalid `scopedcss\C:\...` output paths. The accepted real watched-tree build remains authoritative for scoped CSS output after review.
 
 ## Memory Rule
 

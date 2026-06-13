@@ -1,5 +1,6 @@
 using CodexUI.Components;
 using CodexUI.Data.Repositories;
+using AICodingServices.McpHub;
 using CodexUI.Services;
 using Microsoft.AspNetCore.Hosting.StaticWebAssets;
 using Radzen;
@@ -34,6 +35,11 @@ public static class Program
         builder.Services.AddSingleton<WorkspaceRepository>();
         builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();
         builder.Services.AddSingleton<ICodexUsageSummaryService, CodexUsageSummaryService>();
+        builder.Services.AddSingleton<LiveMcpTelemetryService>();
+        builder.Services.AddSingleton<IMcpTelemetrySink>(
+            services => services.GetRequiredService<LiveMcpTelemetryService>());
+        builder.Services.AddSingleton<ITelemetryViewService>(
+            services => services.GetRequiredService<LiveMcpTelemetryService>());
         builder.Services.AddSingleton<IDashboardViewService, CodingServicesDashboardViewService>();
         builder.Services.AddSingleton<IWatchedSolutionViewService, WatchedSolutionViewService>();
         builder.Services.AddSingleton<SourceNavigationState>();

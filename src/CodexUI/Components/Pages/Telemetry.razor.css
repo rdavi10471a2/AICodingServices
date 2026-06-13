@@ -1,0 +1,134 @@
+.telemetry-page {
+    margin: 0;
+    max-width: none;
+    padding: 1.4rem 1.8rem 2rem;
+}
+
+.telemetry-panel {
+    border: 1px solid #d9e0e7;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    padding: 1.15rem 1.25rem;
+}
+
+.telemetry-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.telemetry-title {
+    font-size: 1.8rem;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1;
+    margin: 0;
+}
+
+.telemetry-subtitle {
+    color: #657387;
+    font-size: 0.9rem;
+    line-height: 1.25;
+    margin: 0.45rem 0 0;
+    overflow-wrap: anywhere;
+}
+
+.telemetry-summary-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(240px, 1.4fr) repeat(5, minmax(120px, 1fr));
+    margin-top: 1rem;
+}
+
+.telemetry-metric {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.8rem;
+}
+
+.telemetry-metric span {
+    color: #657387;
+    font-size: 0.72rem;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.telemetry-metric strong {
+    font-size: 1rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.telemetry-state {
+    background: #202833;
+    border-color: #2d3745;
+    color: #f8fafc;
+}
+
+.telemetry-state span {
+    color: #c5d0df;
+}
+
+.telemetry-events-panel {
+    padding: 0;
+}
+
+.traffic-table {
+    display: grid;
+    overflow-x: auto;
+}
+
+.traffic-row {
+    align-items: start;
+    border-bottom: 1px solid #e2e8f0;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 90px 90px minmax(160px, 0.75fr) 90px 140px minmax(260px, 1.4fr);
+    min-width: 920px;
+    padding: 0.75rem 0.95rem;
+}
+
+.traffic-row-header {
+    background: #f8fafc;
+    color: #657387;
+    font-size: 0.72rem;
+    font-weight: 750;
+    text-transform: uppercase;
+}
+
+.traffic-row-error {
+    background: #fff5f5;
+}
+
+.traffic-preview {
+    color: #42546b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.traffic-empty {
+    color: #657387;
+    padding: 1rem;
+}
+
+@media (max-width: 980px) {
+    .telemetry-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .telemetry-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .telemetry-summary-grid {
+        grid-template-columns: 1fr;
+    }
+}

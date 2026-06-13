@@ -22,21 +22,26 @@ public sealed class StagedDiffLaunchWorkflow
 
         IReadOnlyList<StagedEditRecord> stagedOverlayRecords = GetStagedOverlayRecords(workflowService, record);
         PreMergeValidationService validationService = new();
-        // Fidelity fix (option A): when the launch is for a planned session whose
-        // batch is fully staged (deferBuildValidationUntilAccept is only set true by the
-        // caller once every planned file is decided-or-staged), run the FULL overlay build
-        // here so the staged batch is build-validated BEFORE any WinMerge merge. The terminal
-        // real-tree build still runs at the final accept. The single-file (non-deferred) path
-        // also runs the full overlay build, so both launch paths now build before merge.
-        PreMergeValidationResult validation = validationService.Validate(settings, record, stagedOverlayRecords);
-        string validationPrompt = "";
+        RecordedValidation? recordedValidation = deferBuildValidationUntilAccept
+            ? TryGetRecordedBatchValidation(stagedOverlayRecords)
+            : null;
+        PreMergeValidationResult validation = recordedValidation?.Validation
+            ?? validationService.Validate(settings, record, stagedOverlayRecords);
+        forceValidation = forceValidation || recordedValidation?.ForceApproved == true;
+        string validationPrompt = recordedValidation is null ? string.Empty : "reused";
         if (validation.IsError && !forceValidation && PreMergeValidationOverridePrompt.CanShow())
         {
             forceValidation = PreMergeValidationOverridePrompt.Prompt(validation.Diagnostics);
             validationPrompt = forceValidation ? "approved" : "cancelled";
         }
 
-        record = workflowService.RecordPreMergeValidation(record.StagedRecordId, validation, forceValidation);
+        record = RecordPreMergeValidation(
+            workflowService,
+            record,
+            stagedOverlayRecords,
+            validation,
+            forceValidation,
+            recordBatchValidation: deferBuildValidationUntilAccept && recordedValidation is null);
         logger.Write(
             validation.IsError ? MonitorLogLevel.Warning : MonitorLogLevel.Information,
             source,
@@ -103,6 +108,73 @@ public sealed class StagedDiffLaunchWorkflow
         };
     }
 
+    private static StagedEditRecord RecordPreMergeValidation(
+        WorkflowEditService workflowService,
+        StagedEditRecord currentRecord,
+        IReadOnlyList<StagedEditRecord> stagedOverlayRecords,
+        PreMergeValidationResult validation,
+        bool forceValidation,
+        bool recordBatchValidation)
+    {
+        if (!recordBatchValidation)
+        {
+            return workflowService.RecordPreMergeValidation(currentRecord.StagedRecordId, validation, forceValidation);
+        }
+
+        StagedEditRecord updatedCurrentRecord = currentRecord;
+        foreach (StagedEditRecord overlayRecord in stagedOverlayRecords)
+        {
+            StagedEditRecord updatedOverlayRecord = workflowService.RecordPreMergeValidation(
+                overlayRecord.StagedRecordId,
+                validation,
+                forceValidation);
+            if (overlayRecord.StagedRecordId.Equals(currentRecord.StagedRecordId, StringComparison.Ordinal))
+            {
+                updatedCurrentRecord = updatedOverlayRecord;
+            }
+        }
+
+        return updatedCurrentRecord;
+    }
+
+    private static RecordedValidation? TryGetRecordedBatchValidation(IReadOnlyList<StagedEditRecord> stagedOverlayRecords)
+    {
+        if (stagedOverlayRecords.Count <= 1)
+        {
+            return null;
+        }
+
+        if (stagedOverlayRecords.Any(record => string.IsNullOrWhiteSpace(record.PreMergeValidationStatus)))
+        {
+            return null;
+        }
+
+        StagedEditRecord firstRecord = stagedOverlayRecords[0];
+        bool allRecordsShareResult = stagedOverlayRecords.All(record =>
+            record.PreMergeValidationStatus.Equals(firstRecord.PreMergeValidationStatus, StringComparison.OrdinalIgnoreCase)
+            && record.PreMergeValidationIsError == firstRecord.PreMergeValidationIsError
+            && record.PreMergeValidationDiagnosticCount == firstRecord.PreMergeValidationDiagnosticCount
+            && record.PreMergeValidationForceApproved == firstRecord.PreMergeValidationForceApproved);
+        if (!allRecordsShareResult)
+        {
+            return null;
+        }
+
+        PreMergeValidationResult validation = new()
+        {
+            Status = firstRecord.PreMergeValidationStatus,
+            IsError = firstRecord.PreMergeValidationIsError,
+            DiagnosticCount = firstRecord.PreMergeValidationDiagnosticCount,
+            Diagnostics = firstRecord.PreMergeValidationIsError
+                ? ["Reused recorded planned overlay validation result from this staged batch."]
+                : [],
+            Message = firstRecord.PreMergeValidationIsError
+                ? "Reused failed planned overlay validation result for this staged batch."
+                : "Reused passed planned overlay validation result for this staged batch."
+        };
+        return new RecordedValidation(validation, firstRecord.PreMergeValidationForceApproved);
+    }
+
     private static IReadOnlyList<StagedEditRecord> GetStagedOverlayRecords(
         WorkflowEditService workflowService,
         StagedEditRecord record)
@@ -127,4 +199,6 @@ public sealed class StagedDiffLaunchWorkflow
             && !record.Status.Equals("superseded", StringComparison.OrdinalIgnoreCase)
             && !record.Classification.Equals("superseded", StringComparison.OrdinalIgnoreCase);
     }
+
+    private sealed record RecordedValidation(PreMergeValidationResult Validation, bool ForceApproved);
 }

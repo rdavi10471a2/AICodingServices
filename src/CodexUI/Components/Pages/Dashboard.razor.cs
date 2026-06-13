@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodexUI.Models;
 using CodexUI.Services;
 using Microsoft.AspNetCore.Components;
@@ -17,6 +18,9 @@ public partial class Dashboard : ComponentBase
 
     [Inject]
     public IWorkspaceStatusService WorkspaceStatusService { get; set; } = null!;
+
+    [Inject]
+    public NavigationManager NavigationManager { get; set; } = null!;
 
     private string McpStatusLabel =>
         model.McpServer.State.Equals("Running", StringComparison.OrdinalIgnoreCase)
@@ -46,6 +50,27 @@ public partial class Dashboard : ComponentBase
     protected override void OnInitialized()
     {
         model = DashboardViewService.GetDashboard();
+    }
+
+    private void LaunchInBrowser()
+    {
+        try
+        {
+            Uri dashboardUri = NavigationManager.ToAbsoluteUri("/");
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = dashboardUri.ToString(),
+                UseShellExecute = true
+            };
+            Process.Start(startInfo);
+            rebuildAlertStyle = AlertStyle.Success;
+            rebuildMessage = "Opened dashboard in the default browser.";
+        }
+        catch (Exception ex)
+        {
+            rebuildAlertStyle = AlertStyle.Danger;
+            rebuildMessage = $"Could not open default browser: {ex.Message}";
+        }
     }
 
     private async Task RebuildIndexAsync()

@@ -9,14 +9,18 @@ public sealed class McpServerProcessService : IHostedService, IMcpServerProcessS
 {
     private readonly object syncRoot = new();
     private readonly ICodexUiMonitorSettingsProvider settingsProvider;
+    private readonly IMcpTelemetrySink telemetrySink;
     private McpProxyHubService? hub;
     private DateTimeOffset? startedAtUtc;
     private string detail = "The AICodingServices MCP hub has not started yet.";
     private string pipeName = "Not started";
 
-    public McpServerProcessService(ICodexUiMonitorSettingsProvider settingsProvider)
+    public McpServerProcessService(
+        ICodexUiMonitorSettingsProvider settingsProvider,
+        IMcpTelemetrySink telemetrySink)
     {
         this.settingsProvider = settingsProvider;
+        this.telemetrySink = telemetrySink;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -31,7 +35,7 @@ public sealed class McpServerProcessService : IHostedService, IMcpServerProcessS
             MonitorSettings settings = settingsProvider.GetSettings();
             string settingsPath = settingsProvider.GetSettingsPath();
             JsonLinesMonitorLogger logger = new(MonitorLogPaths.GetDefaultLogPath(settings));
-            hub = new McpProxyHubService(settings, logger, settingsPath);
+            hub = new McpProxyHubService(settings, logger, settingsPath, telemetrySink);
             pipeName = hub.PipeName;
             startedAtUtc = DateTimeOffset.UtcNow;
             detail = $"CodexUI owns the AICodingServices MCP hub. Bridge clients should connect with server '{McpProxyHubService.ServerName}'.";

@@ -1,0 +1,73 @@
+@page "/telemetry"
+@rendermode InteractiveServer
+
+<PageTitle>MCP Telemetry</PageTitle>
+
+<section class="telemetry-page">
+    <RadzenStack Gap="1rem">
+        <RadzenCard class="telemetry-panel">
+            <div class="telemetry-header">
+                <div>
+                    <RadzenText TextStyle="TextStyle.H1" class="telemetry-title">MCP Telemetry</RadzenText>
+                    <p class="telemetry-subtitle">@model.SourceLabel</p>
+                </div>
+                <RadzenButton Text="Refresh" Icon="refresh" ButtonStyle="ButtonStyle.Light" Click="Refresh" />
+            </div>
+
+            <div class="telemetry-summary-grid">
+                <div class="telemetry-metric telemetry-state">
+                    <span>State</span>
+                    <strong>@model.State</strong>
+                </div>
+                <div class="telemetry-metric">
+                    <span>Events</span>
+                    <strong>@model.EventCount.ToString("N0")</strong>
+                </div>
+                <div class="telemetry-metric">
+                    <span>Requests</span>
+                    <strong>@model.RequestCount.ToString("N0")</strong>
+                </div>
+                <div class="telemetry-metric">
+                    <span>Responses</span>
+                    <strong>@model.ResponseCount.ToString("N0")</strong>
+                </div>
+                <div class="telemetry-metric">
+                    <span>Errors</span>
+                    <strong>@model.ErrorCount.ToString("N0")</strong>
+                </div>
+                <div class="telemetry-metric">
+                    <span>Last Event</span>
+                    <strong>@model.LastEventLabel</strong>
+                </div>
+            </div>
+        </RadzenCard>
+
+        <RadzenCard class="telemetry-panel telemetry-events-panel">
+            <div class="traffic-table" role="table" aria-label="Recent MCP traffic">
+                <div class="traffic-row traffic-row-header" role="row">
+                    <span>Time</span>
+                    <span>Direction</span>
+                    <span>Tool</span>
+                    <span>Duration</span>
+                    <span>Size</span>
+                    <span>Preview</span>
+                </div>
+                @if (model.Events.Count == 0)
+                {
+                    <div class="traffic-empty">Waiting for the next MCP bridge call.</div>
+                }
+                @foreach (TelemetryEventViewModel telemetryEvent in model.Events)
+                {
+                    <div class="traffic-row @(telemetryEvent.IsError ? "traffic-row-error" : string.Empty)" role="row">
+                        <span>@telemetryEvent.TimestampLabel</span>
+                        <span>@telemetryEvent.Direction</span>
+                        <span>@telemetryEvent.ToolLabel</span>
+                        <span>@telemetryEvent.DurationLabel</span>
+                        <span>@telemetryEvent.SizeLabel</span>
+                        <span class="traffic-preview">@telemetryEvent.Preview</span>
+                    </div>
+                }
+            </div>
+        </RadzenCard>
+    </RadzenStack>
+</section>

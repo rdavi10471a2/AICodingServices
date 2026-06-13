@@ -6,6 +6,7 @@
     <ProjectReference Include="..\AICodingServices.Indexing\AICodingServices.Indexing.csproj" />
     <ProjectReference Include="..\AICodingServices.Logging\AICodingServices.Logging.csproj" />
     <ProjectReference Include="..\AICodingServices.McpHub\AICodingServices.McpHub.csproj" />
+    <ProjectReference Include="..\AICodingServices.McpServer\AICodingServices.McpServer.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

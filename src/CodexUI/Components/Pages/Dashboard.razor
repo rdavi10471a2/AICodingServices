@@ -6,16 +6,22 @@
 <section class="overview-page">
     <RadzenStack Gap="1rem">
         <RadzenCard class="overview-hero">
-            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Gap="1rem">
-                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem" class="solution-title-row">
-                    <RadzenText TextStyle="TextStyle.H1" class="overview-title">@model.Title</RadzenText>
-                    <RadzenStack Gap="0.2rem" class="observed-solution">
-                        <span class="observing-label">(observing)</span>
+            <div class="overview-hero-layout">
+                <div class="overview-summary">
+                    <div class="overview-title-line">
+                        <RadzenText TextStyle="TextStyle.H1" class="overview-title">@model.Title</RadzenText>
+                        <span class="dashboard-version">v0.1.3</span>
+                    </div>
+                    <div class="observed-solution">
+                        <span class="observing-label">Observing</span>
                         <RadzenText class="target-path">@model.WatchedSolutionPath</RadzenText>
-                    </RadzenStack>
+                    </div>
+                </div>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.65rem" class="hero-actions">
+                    <RadzenButton Text="Launch in Browser" Icon="open_in_new" ButtonStyle="ButtonStyle.Light" Click="LaunchInBrowser" class="launch-browser-button" />
+                    <RadzenBadge BadgeStyle="@McpBadgeStyle" Text="@McpStatusLabel" class="status-badge" />
                 </RadzenStack>
-                <RadzenBadge BadgeStyle="@McpBadgeStyle" Text="@McpStatusLabel" class="status-badge" />
-            </RadzenStack>
+            </div>
         </RadzenCard>
 
         <RadzenCard class="index-panel">
@@ -93,26 +99,32 @@
                     <RadzenBadge BadgeStyle="BadgeStyle.Info" Text="@model.CodexUsage.State" class="status-badge" />
                 </div>
 
-                <div class="usage-balance-grid">
-                    <div class="usage-balance-card">
-                        <span>5 hour usage limit</span>
-                        <strong>@model.CodexUsage.FiveHourLabel</strong>
-                        <div class="usage-progress">
-                            <div style="@GetUsageProgressStyle(model.CodexUsage.FiveHourRemainingPercent)"></div>
+                <div class="usage-overview-grid">
+                    <div class="usage-section usage-limits-section">
+                        <div class="usage-section-header">
+                            <RadzenText TextStyle="TextStyle.H3" class="usage-section-title">Limits</RadzenText>
+                            <strong>@model.CodexUsage.State</strong>
                         </div>
-                        <small>Resets @model.CodexUsage.FiveHourResetLabel</small>
-                    </div>
-                    <div class="usage-balance-card">
-                        <span>Weekly usage limit</span>
-                        <strong>@model.CodexUsage.WeeklyLabel</strong>
-                        <div class="usage-progress">
-                            <div style="@GetUsageProgressStyle(model.CodexUsage.WeeklyRemainingPercent)"></div>
+                        <div class="usage-balance-grid">
+                            <div class="usage-balance-card">
+                                <span>5 hour limit</span>
+                                <strong>@model.CodexUsage.FiveHourLabel</strong>
+                                <div class="usage-progress">
+                                    <div style="@GetUsageProgressStyle(model.CodexUsage.FiveHourRemainingPercent)"></div>
+                                </div>
+                                <small>Resets @model.CodexUsage.FiveHourResetLabel</small>
+                            </div>
+                            <div class="usage-balance-card">
+                                <span>Weekly limit</span>
+                                <strong>@model.CodexUsage.WeeklyLabel</strong>
+                                <div class="usage-progress">
+                                    <div style="@GetUsageProgressStyle(model.CodexUsage.WeeklyRemainingPercent)"></div>
+                                </div>
+                                <small>Resets @model.CodexUsage.WeeklyResetLabel</small>
+                            </div>
                         </div>
-                        <small>Resets @model.CodexUsage.WeeklyResetLabel</small>
                     </div>
-                </div>
 
-                <div class="usage-split-grid">
                     <div class="usage-section">
                         <div class="usage-section-header">
                             <RadzenText TextStyle="TextStyle.H3" class="usage-section-title">Last Turn</RadzenText>
@@ -161,25 +173,24 @@
                                 <strong>@model.CodexUsage.SessionFileCount.ToString("N0")</strong>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="usage-detail-grid">
-                    <div class="detail-tile">
-                        <span>Total Tokens</span>
-                        <strong>@model.CodexUsage.TotalTokens.ToString("N0")</strong>
-                    </div>
-                    <div class="detail-tile">
-                        <span>Fresh Input</span>
-                        <strong>@model.CodexUsage.FreshInputTokens.ToString("N0")</strong>
-                    </div>
-                    <div class="detail-tile">
-                        <span>Cached Input</span>
-                        <strong>@model.CodexUsage.CachedInputTokens.ToString("N0")</strong>
-                    </div>
-                    <div class="detail-tile">
-                        <span>Output</span>
-                        <strong>@model.CodexUsage.OutputTokens.ToString("N0")</strong>
+                        <div class="usage-total-grid">
+                            <div>
+                                <span>Total</span>
+                                <strong>@model.CodexUsage.TotalTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Fresh</span>
+                                <strong>@model.CodexUsage.FreshInputTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Cached</span>
+                                <strong>@model.CodexUsage.CachedInputTokens.ToString("N0")</strong>
+                            </div>
+                            <div>
+                                <span>Output</span>
+                                <strong>@model.CodexUsage.OutputTokens.ToString("N0")</strong>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </RadzenStack>

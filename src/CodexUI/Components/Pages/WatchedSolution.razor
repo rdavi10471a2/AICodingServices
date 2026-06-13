@@ -8,10 +8,9 @@
 
 <section class="source-page">
     <header class="page-header">
-        <div>
-            <p class="eyebrow">Read-Only Source</p>
+        <div class="page-title-row">
             <h1>Watched Solution</h1>
-            <p class="page-subtitle">@model.WatchedSolutionPath</p>
+            <span class="page-subtitle">@model.WatchedSolutionPath</span>
         </div>
         <div class="header-actions">
             @if (model.Workspace.RebuildRequired || model.Files.Count == 0)
@@ -20,14 +19,13 @@
                     @(isRebuildingIndex ? "Rebuilding index..." : "Rebuild Index")
                 </button>
             }
-            <div class="status-pill">@model.Status</div>
         </div>
     </header>
 
     <div class="source-layout">
         <aside class="source-tree" aria-label="Watched source tree">
             <div class="panel-heading">
-                <h2>Tree</h2>
+                <h2>Watched Source</h2>
                 <span>@model.Files.Count</span>
             </div>
             <nav class="source-tree-list">
@@ -51,7 +49,6 @@
                 <div class="source-toolbar">
                     <div>
                         <h2>@model.SelectedFile.RelativePath</h2>
-                        <span>@model.SelectedFile.FullPath</span>
                     </div>
                     <strong>@model.SelectedFile.Language</strong>
                 </div>

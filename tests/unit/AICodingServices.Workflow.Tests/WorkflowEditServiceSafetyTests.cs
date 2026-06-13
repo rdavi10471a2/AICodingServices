@@ -532,6 +532,164 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.Contains(result.OverlayValidation.Diagnostics, diagnostic => diagnostic.Id == "CS0103");
     }
 
+
+    [Fact]
+    public void PreMergeValidation_uses_real_tree_overlay_for_test_project_edits()
+    {
+        PreMergeFixture fixture = CreatePreMergeFixture(includeSmokeProject: true);
+        WorkflowEditService service = new(fixture.Settings);
+        EditSessionStatus refresh = service.Refresh(fixture.SmokeFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, "namespace BrokenSmokeTests; internal static class Program { public static string Broken => ; }");
+        StagedEditRecord record = service.Stage(fixture.SmokeFilePath);
+
+        PreMergeValidationResult validation = new PreMergeValidationService().Validate(fixture.Settings, record);
+
+        Assert.True(validation.IsError);
+        Assert.Equal("failed", validation.Status);
+        Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("CS1525", StringComparison.OrdinalIgnoreCase));
+        Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(fixture.SmokeFilePath)!, "obj", "Debug", "net10.0", "apphost.exe")));
+    }
+
+    [Fact]
+    public void PreMergeValidation_does_not_clone_or_build_unrelated_smoke_projects_for_product_edits()
+    {
+        PreMergeFixture fixture = CreatePreMergeFixture(includeSmokeProject: true);
+        WorkflowEditService service = new(fixture.Settings);
+        EditSessionStatus refresh = service.Refresh(fixture.AppFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, "namespace App; internal static class Program { public static string Value => \"candidate\"; }");
+        StagedEditRecord record = service.Stage(fixture.AppFilePath);
+
+        PreMergeValidationResult validation = new PreMergeValidationService().Validate(fixture.Settings, record);
+
+        Assert.False(validation.IsError, string.Join(Environment.NewLine, validation.Diagnostics));
+        Assert.Equal("passed", validation.Status);
+        Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
+        Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
+    }
+
+    [Fact]
+    public void PreMergeValidation_builds_blazor_scoped_css_overlay_without_absolute_scoped_css_paths()
+    {
+        ScopedCssPreMergeFixture fixture = CreateScopedCssPreMergeFixture();
+        WorkflowEditService service = new(fixture.Settings);
+        EditSessionStatus refresh = service.Refresh(fixture.ScopedCssFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, "h1 { color: blue; }");
+        StagedEditRecord record = service.Stage(fixture.ScopedCssFilePath);
+
+        PreMergeValidationResult validation = new PreMergeValidationService().Validate(fixture.Settings, record);
+
+        Assert.False(validation.IsError, string.Join(Environment.NewLine, validation.Diagnostics));
+        Assert.Equal("passed", validation.Status);
+        Assert.DoesNotContain(
+            validation.Diagnostics,
+            diagnostic => diagnostic.Contains("RewriteCss", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ScopedCssPreMergeFixture CreateScopedCssPreMergeFixture()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesPreMergeScopedCssTests", Guid.NewGuid().ToString("N"));
+        string repositoryRoot = Path.Combine(tempRoot, "Repo");
+        string runtimeRoot = Path.Combine(tempRoot, "Runtime");
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string appRoot = Path.Combine(watchedRoot, "src", "ScopedCssApp");
+        string solutionPath = Path.Combine(watchedRoot, "Fixture.slnx");
+        string projectPath = Path.Combine(appRoot, "ScopedCssApp.csproj");
+        string componentPath = Path.Combine(appRoot, "Dashboard.razor");
+        string scopedCssPath = Path.Combine(appRoot, "Dashboard.razor.css");
+
+        Directory.CreateDirectory(appRoot);
+        File.WriteAllText(
+            solutionPath,
+            """
+            <Solution>
+              <Folder Name="/src/">
+                <Project Path="src/ScopedCssApp/ScopedCssApp.csproj" />
+              </Folder>
+            </Solution>
+            """);
+        File.WriteAllText(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk.Razor">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <FrameworkReference Include="Microsoft.AspNetCore.App" />
+              </ItemGroup>
+            </Project>
+            """);
+        File.WriteAllText(componentPath, "<h1>Original</h1>");
+        File.WriteAllText(scopedCssPath, "h1 { color: red; }");
+
+        return new ScopedCssPreMergeFixture(
+            MonitorSettings.Create(repositoryRoot, solutionPath, runtimeRoot),
+            scopedCssPath);
+    }
+
+    private static PreMergeFixture CreatePreMergeFixture(bool includeSmokeProject)
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesPreMergeTests", Guid.NewGuid().ToString("N"));
+        string repositoryRoot = Path.Combine(tempRoot, "Repo");
+        string runtimeRoot = Path.Combine(tempRoot, "Runtime");
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string appRoot = Path.Combine(watchedRoot, "src", "App");
+        string smokeRoot = Path.Combine(watchedRoot, "tests", "smoke", "BrokenSmokeTests");
+        string solutionPath = Path.Combine(watchedRoot, "Fixture.slnx");
+        string appProjectPath = Path.Combine(appRoot, "App.csproj");
+        string appFilePath = Path.Combine(appRoot, "Program.cs");
+        string smokeProjectPath = Path.Combine(smokeRoot, "BrokenSmokeTests.csproj");
+        string smokeFilePath = Path.Combine(smokeRoot, "Program.cs");
+
+        Directory.CreateDirectory(appRoot);
+        Directory.CreateDirectory(smokeRoot);
+        File.WriteAllText(
+            solutionPath,
+            includeSmokeProject
+                ? """
+                  <Solution>
+                    <Folder Name="/src/">
+                      <Project Path="src/App/App.csproj" />
+                    </Folder>
+                    <Folder Name="/tests/smoke/">
+                      <Project Path="tests/smoke/BrokenSmokeTests/BrokenSmokeTests.csproj" />
+                    </Folder>
+                  </Solution>
+                  """
+                : """
+                  <Solution>
+                    <Folder Name="/src/">
+                      <Project Path="src/App/App.csproj" />
+                    </Folder>
+                  </Solution>
+                  """);
+        File.WriteAllText(
+            appProjectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(appFilePath, "namespace App; internal static class Program { public static string Value => \"original\"; }");
+        File.WriteAllText(
+            smokeProjectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(smokeFilePath, "namespace BrokenSmokeTests; internal static class Program { public static string Value => \"original\"; }");
+
+        return new PreMergeFixture(
+            MonitorSettings.Create(repositoryRoot, solutionPath, runtimeRoot),
+            appFilePath,
+            smokeFilePath);
+    }
     private static StagedEditRecord StageChangedCandidate(WorkflowEditService service, WorkflowFixture fixture)
     {
         EditSessionStatus refresh = service.Refresh(fixture.ProgramFilePath);
@@ -616,6 +774,16 @@ public sealed class WorkflowEditServiceSafetyTests
             consumerPath,
             presenterPath);
     }
+
+
+    private sealed record PreMergeFixture(
+        MonitorSettings Settings,
+        string AppFilePath,
+        string SmokeFilePath);
+
+    private sealed record ScopedCssPreMergeFixture(
+        MonitorSettings Settings,
+        string ScopedCssFilePath);
 
     private sealed record WorkflowFixture(MonitorSettings Settings, string ProgramFilePath);
 
