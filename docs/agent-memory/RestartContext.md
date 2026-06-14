@@ -32,7 +32,9 @@ Use this file after context loss, plugin restarts, MCP reconnects, or self-edit 
 - The logger is generic and phase-free: it listens to `ProjectStarted`, `ProjectFinished`, `WarningRaised`, and `ErrorRaised`; workflow code should tag returned counts as overlay or final.
 - Count failures as `started - succeeded` at shutdown so started projects without finished events are represented.
 - Command posture must remain local-cache/no-network: keep `--no-restore`, `--nologo`, `-noconsolelogger`, and `/nodeReuse:false`.
-- Next integration step: wire `ProjectCountLogger` into pre-merge overlay validation and final real-tree validation, storing phase-specific JSON artifacts while returning only compact count summaries to the LLM.
+- Next integration step: replace split noisy/governed build concepts with one canonical build path: `BuildRequest -> IBuildRunner -> BuildResult`. All callers, including MCP, UI, pre-merge overlay validation, final accepted-tree validation, and future Semantic Kernel routing, should use this single service.
+- Canonical build service rules: always apply local-cache switches, always attach `ProjectCountLogger`, always write raw stdout/stderr plus logger JSON to runtime artifacts, and return only structured `BuildProjectCounts`, exit code, artifact paths, and minimal diagnostics to LLM-facing surfaces.
+- First proof target for the next session: migrate one validation caller to the canonical build service and add a test proving the MCP/validation response contains the compact count object without normal MSBuild project/target chatter.
 
 ## Startup Modes
 
