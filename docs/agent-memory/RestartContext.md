@@ -23,6 +23,18 @@ Use this file after context loss, plugin restarts, MCP reconnects, or self-edit 
 - CodingServices product edits should still go through the CodingServices watched-source workflow when CodingServices is the watched solution: Working candidate, staged review, WinMerge save, recorded decision, and index refresh.
 - Pre-merge validation uses real watched projects with isolated validation artifacts and disables default scoped CSS item discovery during predictive overlay builds so staged `.razor.css` runtime paths do not produce invalid `scopedcss\C:\...` output paths. The accepted real watched-tree build remains authoritative for scoped CSS output after review.
 
+## Current Logger Implementation Goal
+
+- Branch checkpoint: `codex/semantic-kernel-workflow-orchestrator` is pushed with governed command reductions routed to MCP launch results and per-kind parsers in `GovernedCommandOutputReducer`.
+- Next goal: add a structured MSBuild logger so build project/warning/error counts come from MSBuild events, not parsed console text.
+- Preferred model shape: `BuildProjectCounts(int TotalProjectsCompiled, int TotalSucceeded, int TotalFailed, int WarningCount, int ErrorCount)` plus `BuildProjectSummary(BuildValidationPhase Phase, BuildProjectCounts Counts)`, where `BuildValidationPhase` is an enum with `Overlay` and `Final`.
+- Logger should stay generic and phase-free: it listens to `ProjectStarted`, `ProjectFinished`, `WarningRaised`, and `ErrorRaised`; workflow code tags the returned counts as overlay or final.
+- Count failures as `started - succeeded` at shutdown so started projects without finished events are represented.
+- Command posture must remain local-cache/no-network: `dotnet build <target> --no-restore --nologo -noconsolelogger /nodeReuse:false -logger:<logger>`. Do not drop `--no-restore` while adding logger support.
+- Capture counts for both build phases: pre-merge overlay validation and final real-tree validation after accept. Store them separately; render only the active phase to the LLM unless comparing phases is useful.
+- Full raw build output stays artifact-side. LLM-facing success output should be count-only; failure output may include the compact count object plus existing minimal diagnostics.
+- Prefer implementing the logger under existing `src/AICodingServices.MSBuild` if the existing MSBuild references are sufficient; avoid new NuGet/package churn unless the cached project cannot support it.
+
 ## Startup Modes
 
 ### Normal Start
