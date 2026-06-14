@@ -579,7 +579,8 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.Contains(
             validation.CommandReductions,
             reduction => reduction.Kind == GovernedCommandKind.Build
-                && reduction.VisibleOutput.Contains("Last successful project outputs:", StringComparison.OrdinalIgnoreCase));
+                && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
+                && reduction.VisibleOutput.Contains("Total Failed: 0", StringComparison.OrdinalIgnoreCase));
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }

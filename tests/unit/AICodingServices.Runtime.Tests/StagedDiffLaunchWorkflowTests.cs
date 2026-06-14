@@ -227,21 +227,21 @@ public sealed class StagedDiffLaunchWorkflowTests
     }
 
     [Fact]
-    public void Reducer_summarizes_successful_build_output_as_project_tail()
+    public void Reducer_summarizes_successful_build_output_as_project_counts()
     {
         string output = string.Join(
             Environment.NewLine,
             [
                 "  First -> C:\\build\\First.dll",
-            "  Second -> C:\\build\\Second.dll",
-            "  Third -> C:\\build\\Third.dll",
-            "  Fourth -> C:\\build\\Fourth.dll",
-            string.Empty,
-            "Build succeeded.",
-            "    0 Warning(s)",
-            "    0 Error(s)",
-            string.Empty,
-            "Time Elapsed 00:00:01.00"
+                "  Second -> C:\\build\\Second.dll",
+                "  Third -> C:\\build\\Third.dll",
+                "  Fourth -> C:\\build\\Fourth.dll",
+                string.Empty,
+                "Build succeeded.",
+                "    0 Warning(s)",
+                "    0 Error(s)",
+                string.Empty,
+                "Time Elapsed 00:00:01.00"
             ]);
         GovernedCommandOutputReducer reducer = new(new GovernedCommandPolicyOptions(ContextLineCount: 2));
 
@@ -251,11 +251,46 @@ public sealed class StagedDiffLaunchWorkflowTests
             "full-output.log");
 
         Assert.Equal(GovernedCommandKind.Build, result.Kind);
-        Assert.Contains("Last successful project outputs:", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Third ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Fourth ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("First ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Build summary:", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            string.Join(
+                Environment.NewLine,
+                [
+                    "Total Projects Compiled: 4",
+                    "Total Succeeded: 4",
+                    "Total Failed: 0"
+                ]),
+            result.VisibleOutput);
+        Assert.True(result.RawOutputCharacters > result.VisibleOutputCharacters);
+    }
+
+    [Fact]
+    public void Reducer_summarizes_test_output_as_result_counts()
+    {
+        string output = string.Join(
+            Environment.NewLine,
+            [
+                "Test run for Example.Tests.dll (.NETCoreApp,Version=v10.0)",
+                "Starting test execution, please wait...",
+                "Passed!  - Failed:     1, Passed:     7, Skipped:     2, Total:    10, Duration: 10 s - Example.Tests.dll (net10.0)"
+            ]);
+        GovernedCommandOutputReducer reducer = new();
+
+        GovernedCommandReductionResult result = reducer.Reduce(
+            new GovernedCommandRequest("dotnet test Example.Tests.csproj"),
+            new GovernedCommandRawResult(output, string.Empty, 1, TimeSpan.FromSeconds(10)),
+            "full-output.log");
+
+        Assert.Equal(GovernedCommandKind.Test, result.Kind);
+        Assert.Equal(
+            string.Join(
+                Environment.NewLine,
+                [
+                    "Total Tests: 10",
+                    "Passed: 7",
+                    "Failed: 1",
+                    "Skipped: 2"
+                ]),
+            result.VisibleOutput);
         Assert.True(result.RawOutputCharacters > result.VisibleOutputCharacters);
     }
 
