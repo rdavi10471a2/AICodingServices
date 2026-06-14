@@ -1014,6 +1014,7 @@ public sealed class AICodingServicesTools
             result.StagedRecordSummary,
             result.StagedRecord,
             result.PreMergeValidation,
+            result.CommandReductions,
             result.DiffLaunch,
             result.NextStep);
     }
@@ -1046,6 +1047,7 @@ public sealed class AICodingServicesTools
             result.StagedRecordSummary,
             result.StagedRecord,
             result.PreMergeValidation,
+            result.CommandReductions,
             result.DiffLaunch,
             result.NextStep);
     }
@@ -1873,6 +1875,7 @@ public sealed record AICodingServicesStagedDiffLaunchResult(
     StagedEditSummary StagedRecordSummary,
     StagedEditRecord? StagedRecord,
     PreMergeValidationResult PreMergeValidation,
+    GovernedCommandReductionResult[] CommandReductions,
     DiffLaunchResult DiffLaunch,
     string NextStep);
 

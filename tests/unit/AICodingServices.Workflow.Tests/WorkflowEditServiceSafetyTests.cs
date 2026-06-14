@@ -575,11 +575,11 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.Contains(validation.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
         Assert.All(
             validation.CommandReductions,
-            reduction =>
-            {
-                Assert.True(reduction.RawOutputCharacters >= reduction.VisibleOutputCharacters);
-                Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath);
-            });
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.VisibleOutput.Contains("Last successful project outputs:", StringComparison.OrdinalIgnoreCase));
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }

@@ -33,7 +33,7 @@ public sealed class GovernedCommandOutputReducer
         List<GovernedCommandDiagnostic> diagnostics = ExtractDiagnostics(lines);
         List<GovernedCommandWarning> warnings = CreateWarnings(request, combinedOutput, fullOutputArtifactPath);
         GovernedCommandOutputMode outputMode = requestedOutputMode ?? ChooseOutputMode(kind, diagnostics.Count);
-        string visibleOutput = BuildVisibleOutput(outputMode, lines, diagnostics);
+        string visibleOutput = BuildVisibleOutput(kind, outputMode, lines, diagnostics);
         bool truncated = visibleOutput.Length < combinedOutput.Length;
 
         if (truncated)
@@ -203,6 +203,7 @@ public sealed class GovernedCommandOutputReducer
     }
 
     private string BuildVisibleOutput(
+        GovernedCommandKind kind,
         GovernedCommandOutputMode outputMode,
         IReadOnlyList<string> lines,
         IReadOnlyList<GovernedCommandDiagnostic> diagnostics)
@@ -215,6 +216,12 @@ public sealed class GovernedCommandOutputReducer
         if (outputMode == GovernedCommandOutputMode.Diagnostics && diagnostics.Count > 0)
         {
             return BuildDiagnosticSummary(diagnostics);
+        }
+
+        if (outputMode == GovernedCommandOutputMode.Diagnostics
+            && (kind == GovernedCommandKind.Build || kind == GovernedCommandKind.Test))
+        {
+            return BuildBuildProgressSummary(lines);
         }
 
         if (outputMode == GovernedCommandOutputMode.Matches)
@@ -251,6 +258,66 @@ public sealed class GovernedCommandOutputReducer
         }
 
         return BoundText(builder.ToString().TrimEnd());
+    }
+
+    private string BuildBuildProgressSummary(IReadOnlyList<string> lines)
+    {
+        string[] projectOutputLines = lines
+            .Where(IsBuildProjectOutputLine)
+            .TakeLast(options.ContextLineCount)
+            .ToArray();
+        string[] summaryLines = lines
+            .Where(IsBuildSummaryLine)
+            .TakeLast(6)
+            .ToArray();
+        if (projectOutputLines.Length == 0 && summaryLines.Length == 0)
+        {
+            return BuildBoundedContext(lines);
+        }
+
+        StringBuilder builder = new();
+        if (projectOutputLines.Length > 0)
+        {
+            builder.AppendLine("Last successful project outputs:");
+            foreach (string line in projectOutputLines)
+            {
+                builder.AppendLine(line.TrimEnd());
+            }
+        }
+
+        if (summaryLines.Length > 0)
+        {
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.AppendLine("Build summary:");
+            foreach (string line in summaryLines)
+            {
+                builder.AppendLine(line.TrimEnd());
+            }
+        }
+
+        return BoundText(builder.ToString().TrimEnd());
+    }
+
+    private static bool IsBuildProjectOutputLine(string line)
+    {
+        string trimmed = line.Trim();
+        return trimmed.Contains(" -> ", StringComparison.Ordinal)
+            && (trimmed.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                || trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsBuildSummaryLine(string line)
+    {
+        string trimmed = line.Trim();
+        return trimmed.Equals("Build succeeded.", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("Build FAILED.", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Warning(s)", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("Error(s)", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("Time Elapsed", StringComparison.OrdinalIgnoreCase);
     }
 
     private string BuildBoundedContext(IReadOnlyList<string> lines)

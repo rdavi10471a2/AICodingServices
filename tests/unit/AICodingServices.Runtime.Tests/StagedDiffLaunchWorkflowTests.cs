@@ -91,6 +91,9 @@ public sealed class StagedDiffLaunchWorkflowTests
 
         Assert.False(firstLaunch.PreMergeValidation.IsError);
         Assert.Equal("passed", firstLaunch.PreMergeValidation.Status);
+        Assert.NotEmpty(firstLaunch.CommandReductions);
+        Assert.Same(firstLaunch.PreMergeValidation.CommandReductions, firstLaunch.CommandReductions);
+        Assert.Contains(firstLaunch.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
         Assert.False(secondAfterFirstLaunch.PreMergeValidationIsError);
         Assert.Equal("passed", secondAfterFirstLaunch.PreMergeValidationStatus);
         Assert.Equal(firstAfterLaunch.PreMergeValidationStatus, secondAfterFirstLaunch.PreMergeValidationStatus);
@@ -215,9 +218,45 @@ public sealed class StagedDiffLaunchWorkflowTests
         }
 
         Assert.True(result.PreMergeValidation.IsError);
+        Assert.NotEmpty(result.CommandReductions);
+        Assert.Same(result.PreMergeValidation.CommandReductions, result.CommandReductions);
+        Assert.Contains(result.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
         Assert.Equal("Browser", result.DiffLaunch.Tool);
         Assert.Equal(0, result.DiffLaunch.ProcessId);
         Assert.Contains("browser review", result.DiffLaunch.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Reducer_summarizes_successful_build_output_as_project_tail()
+    {
+        string output = string.Join(
+            Environment.NewLine,
+            [
+                "  First -> C:\\build\\First.dll",
+            "  Second -> C:\\build\\Second.dll",
+            "  Third -> C:\\build\\Third.dll",
+            "  Fourth -> C:\\build\\Fourth.dll",
+            string.Empty,
+            "Build succeeded.",
+            "    0 Warning(s)",
+            "    0 Error(s)",
+            string.Empty,
+            "Time Elapsed 00:00:01.00"
+            ]);
+        GovernedCommandOutputReducer reducer = new(new GovernedCommandPolicyOptions(ContextLineCount: 2));
+
+        GovernedCommandReductionResult result = reducer.Reduce(
+            new GovernedCommandRequest("dotnet build Example.csproj"),
+            new GovernedCommandRawResult(output, string.Empty, 0, TimeSpan.FromSeconds(1)),
+            "full-output.log");
+
+        Assert.Equal(GovernedCommandKind.Build, result.Kind);
+        Assert.Contains("Last successful project outputs:", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Third ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Fourth ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("First ->", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Build summary:", result.VisibleOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.RawOutputCharacters > result.VisibleOutputCharacters);
     }
 
     [Fact]

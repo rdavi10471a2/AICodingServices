@@ -10,6 +10,8 @@ public sealed class StagedDiffLaunchWorkflowResult
 
     public PreMergeValidationResult PreMergeValidation { get; set; } = new();
 
+    public GovernedCommandReductionResult[] CommandReductions { get; set; } = [];
+
     public DiffLaunchResult DiffLaunch { get; set; } = new();
 
     public string NextStep { get; set; } = string.Empty;

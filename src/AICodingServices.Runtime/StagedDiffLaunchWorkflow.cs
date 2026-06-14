@@ -78,6 +78,7 @@ public sealed class StagedDiffLaunchWorkflow
                 StagedRecordSummary = workflowService.CreateSummary(blocked),
                 StagedRecord = verbose ? blocked : null,
                 PreMergeValidation = validation,
+                CommandReductions = validation.CommandReductions,
                 DiffLaunch = new DiffLaunchResult
                 {
                     Launched = false,
@@ -117,6 +118,7 @@ public sealed class StagedDiffLaunchWorkflow
             StagedRecordSummary = workflowService.CreateSummary(updated),
             StagedRecord = verbose ? updated : null,
             PreMergeValidation = validation,
+            CommandReductions = validation.CommandReductions,
             DiffLaunch = launch,
             NextStep = GetNextStep(record, resolvedLaunchSurface)
         };
