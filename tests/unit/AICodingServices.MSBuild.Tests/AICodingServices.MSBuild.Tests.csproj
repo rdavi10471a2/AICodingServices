@@ -15,6 +15,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="Microsoft.Build.Framework">
+      <HintPath>$(NuGetPackageRoot)microsoft.build.framework\17.11.48\lib\net8.0\Microsoft.Build.Framework.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 

@@ -23,17 +23,16 @@ Use this file after context loss, plugin restarts, MCP reconnects, or self-edit 
 - CodingServices product edits should still go through the CodingServices watched-source workflow when CodingServices is the watched solution: Working candidate, staged review, WinMerge save, recorded decision, and index refresh.
 - Pre-merge validation uses real watched projects with isolated validation artifacts and disables default scoped CSS item discovery during predictive overlay builds so staged `.razor.css` runtime paths do not produce invalid `scopedcss\C:\...` output paths. The accepted real watched-tree build remains authoritative for scoped CSS output after review.
 
-## Current Logger Implementation Goal
+## Current Logger Implementation State
 
-- Branch checkpoint: `codex/semantic-kernel-workflow-orchestrator` is pushed with governed command reductions routed to MCP launch results and per-kind parsers in `GovernedCommandOutputReducer`.
-- Next goal: add a structured MSBuild logger so build project/warning/error counts come from MSBuild events, not parsed console text.
-- Preferred model shape: `BuildProjectCounts(int TotalProjectsCompiled, int TotalSucceeded, int TotalFailed, int WarningCount, int ErrorCount)` plus `BuildProjectSummary(BuildValidationPhase Phase, BuildProjectCounts Counts)`, where `BuildValidationPhase` is an enum with `Overlay` and `Final`.
-- Logger should stay generic and phase-free: it listens to `ProjectStarted`, `ProjectFinished`, `WarningRaised`, and `ErrorRaised`; workflow code tags the returned counts as overlay or final.
+- Branch checkpoint: `codex/semantic-kernel-workflow-orchestrator` now contains governed command reductions plus a structured MSBuild project-count logger under `src/AICodingServices.MSBuild`.
+- Logger types: `BuildProjectCounts`, `BuildProjectSummary`, `BuildValidationPhase`, and `ProjectCountLogger`.
+- Proven command shape: `dotnet build <target> --no-restore --nologo -v:quiet -noconsolelogger /nodeReuse:false "/logger:AICodingServices.MSBuild.ProjectCountLogger,<AICodingServices.MSBuild.dll>;summaryJson=<path>;console=true"`.
+- Proven output for a clean single-project build is count-only on stdout: `Total Projects Compiled`, `Total Succeeded`, `Total Failed`, `Warnings`, and `Errors`; the same values are written as JSON when `summaryJson` is supplied.
+- The logger is generic and phase-free: it listens to `ProjectStarted`, `ProjectFinished`, `WarningRaised`, and `ErrorRaised`; workflow code should tag returned counts as overlay or final.
 - Count failures as `started - succeeded` at shutdown so started projects without finished events are represented.
-- Command posture must remain local-cache/no-network: `dotnet build <target> --no-restore --nologo -noconsolelogger /nodeReuse:false -logger:<logger>`. Do not drop `--no-restore` while adding logger support.
-- Capture counts for both build phases: pre-merge overlay validation and final real-tree validation after accept. Store them separately; render only the active phase to the LLM unless comparing phases is useful.
-- Full raw build output stays artifact-side. LLM-facing success output should be count-only; failure output may include the compact count object plus existing minimal diagnostics.
-- Prefer implementing the logger under existing `src/AICodingServices.MSBuild` if the existing MSBuild references are sufficient; avoid new NuGet/package churn unless the cached project cannot support it.
+- Command posture must remain local-cache/no-network: keep `--no-restore`, `--nologo`, `-noconsolelogger`, and `/nodeReuse:false`.
+- Next integration step: wire `ProjectCountLogger` into pre-merge overlay validation and final real-tree validation, storing phase-specific JSON artifacts while returning only compact count summaries to the LLM.
 
 ## Startup Modes
 
