@@ -289,6 +289,7 @@ public sealed class WorkflowEditService
         EditSessionManifest manifest = LoadManifest(fullWatchedPath)
             ?? throw new InvalidOperationException("No edit session exists for this file. Run edit refresh first.");
         EnsureSessionCanEdit(manifest);
+        EnsureEditToolAllowedForExactTextReplacement(fullWatchedPath, manifest);
         if (!File.Exists(manifest.WorkingFilePath))
         {
             throw new FileNotFoundException("Working candidate file was not found.", manifest.WorkingFilePath);
@@ -492,6 +493,17 @@ public sealed class WorkflowEditService
 
         EnsureSessionCanEdit(manifest);
         return WriteCandidateContent(fullWatchedPath, manifest, content, manifestJson, validateOverlay);
+    }
+
+    private static void EnsureEditToolAllowedForExactTextReplacement(string fullWatchedPath, EditSessionManifest manifest)
+    {
+        if (!fullWatchedPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"replace_text_in_file is not allowed for C# watched source ({manifest.RelativePath}). Use Roslyn typed edit tools for C# symbols or source-map-backed replace_span_in_file when a span edit is explicitly required.");
     }
 
     private EditSessionStatus WriteCandidateContent(
