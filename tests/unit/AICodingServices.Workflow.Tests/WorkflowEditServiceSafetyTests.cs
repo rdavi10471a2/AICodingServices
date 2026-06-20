@@ -1,4 +1,5 @@
 using AICodingServices.Core;
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Workflow.Tests;
@@ -580,7 +581,13 @@ public sealed class WorkflowEditServiceSafetyTests
             validation.CommandReductions,
             reduction => reduction.Kind == GovernedCommandKind.Build
                 && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
-                && reduction.VisibleOutput.Contains("Total Failed: 0", StringComparison.OrdinalIgnoreCase));
+                && reduction.VisibleOutput.Contains("Total Failed: 0", StringComparison.OrdinalIgnoreCase)
+                && !reduction.VisibleOutput.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            validation.BuildSummaries,
+            summary => summary.Phase == BuildValidationPhase.Overlay
+                && summary.Counts.TotalProjectsCompiled > 0
+                && summary.Counts.TotalFailed == 0);
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }

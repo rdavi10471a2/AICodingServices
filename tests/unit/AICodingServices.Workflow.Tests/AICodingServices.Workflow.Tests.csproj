@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\..\src\AICodingServices.MSBuild\AICodingServices.MSBuild.csproj" />
     <ProjectReference Include="..\..\..\src\AICodingServices.Workflow\AICodingServices.Workflow.csproj" />
   </ItemGroup>
 

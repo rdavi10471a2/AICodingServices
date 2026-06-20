@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Xml.Linq;
 using AICodingServices.Core;
+using AICodingServices.MSBuild;
 
 namespace AICodingServices.Workflow;
 
@@ -112,6 +113,7 @@ public sealed class PreMergeValidationService
                 Diagnostics = errorDiagnostics,
                 ValidationWorkspacePath = validationWorkspaceRoot,
                 CommandReductions = build.CommandReductions,
+                BuildSummaries = build.BuildSummaries,
                 Message = build.TimedOut
                     ? CreateValidationMessage("timed out", overlayRecords.Length, buildTargets.Length)
                     : build.Failed
@@ -200,10 +202,13 @@ public sealed class PreMergeValidationService
     {
         List<string> outputBlocks = [];
         List<GovernedCommandReductionResult> commandReductions = [];
+        List<BuildDiagnostic> buildDiagnostics = [];
+        List<BuildProjectSummary> buildSummaries = [];
         int lastExitCode = 0;
         bool timedOut = false;
         GovernedCommandOutputReducer reducer = new();
         GovernedCommandArtifactWriter artifactWriter = new(runtimeRoot);
+        IBuildRunner buildRunner = new DotNetBuildRunner();
         foreach (string buildTarget in buildTargets)
         {
             string[] restoreArguments =
@@ -237,13 +242,8 @@ public sealed class PreMergeValidationService
                 break;
             }
 
-            string[] buildArguments =
+            string[] additionalBuildArguments =
             [
-                "build",
-                buildTarget,
-                "--no-restore",
-                "--nologo",
-                "-v:minimal",
                 "--artifacts-path",
                 artifactsPath,
                 "/p:UseAppHost=false",
@@ -251,19 +251,18 @@ public sealed class PreMergeValidationService
                 DisableDefaultScopedCssItemsProperty,
                 $"/p:CustomAfterMicrosoftCommonTargets={overlayTargetsPath}"
             ];
-            ProcessResult build = RunProcess(
-                "dotnet",
-                buildArguments,
-                sourceRoot,
+            BuildResult build = buildRunner.Run(
+                new BuildRequest(
+                    buildTarget,
+                    BuildValidationPhase.Overlay,
+                    sourceRoot,
+                    Path.Combine(artifactsPath, "build"),
+                    additionalBuildArguments),
                 TimeSpan.FromMinutes(3));
-            GovernedCommandReductionResult buildReduction = ReduceProcessResult(
-                reducer,
-                artifactWriter,
-                "dotnet",
-                buildArguments,
-                sourceRoot,
-                build);
+            GovernedCommandReductionResult buildReduction = CreateBuildReduction(build);
             commandReductions.Add(buildReduction);
+            buildSummaries.Add(build.ToSummary());
+            buildDiagnostics.AddRange(build.Diagnostics);
             lastExitCode = build.ExitCode;
             timedOut = timedOut || build.TimedOut;
             outputBlocks.Add(buildReduction.VisibleOutput);
@@ -278,9 +277,10 @@ public sealed class PreMergeValidationService
             timedOut,
             timedOut || lastExitCode != 0,
             string.Join(Environment.NewLine, outputBlocks),
-            commandReductions.ToArray());
+            commandReductions.ToArray(),
+            buildDiagnostics.ToArray(),
+            buildSummaries.ToArray());
     }
-
     private static string[] ResolveValidationProjectPaths(string watchedSolutionPath, string sourceRoot)
     {
         string extension = Path.GetExtension(watchedSolutionPath);
@@ -489,6 +489,45 @@ public sealed class PreMergeValidationService
             || directoryName.Equals("runtime", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static GovernedCommandReductionResult CreateBuildReduction(BuildResult build)
+    {
+        string visibleOutput = build.Counts.ToDisplayText();
+        GovernedCommandDiagnostic[] diagnostics = build.Diagnostics.Select(ToGovernedDiagnostic).ToArray();
+        int visibleLineCount = visibleOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Length;
+        return new GovernedCommandReductionResult(
+            GovernedCommandKind.Build,
+            GovernedCommandOutputMode.Diagnostics,
+            build.ExitCode,
+            (long)build.Duration.TotalMilliseconds,
+            build.RawOutputCharacters,
+            visibleOutput.Length,
+            visibleLineCount,
+            Truncated: false,
+            visibleOutput,
+            build.RawOutputPath,
+            diagnostics,
+            Array.Empty<GovernedCommandWarning>());
+    }
+
+    private static GovernedCommandDiagnostic ToGovernedDiagnostic(BuildDiagnostic diagnostic)
+    {
+        return new GovernedCommandDiagnostic(
+            diagnostic.FilePath,
+            diagnostic.Line,
+            diagnostic.Column,
+            diagnostic.Severity,
+            diagnostic.Code,
+            diagnostic.Message,
+            diagnostic.ProjectPath);
+    }
+
+    private static string FormatDiagnostic(BuildDiagnostic diagnostic)
+    {
+        string location = string.IsNullOrWhiteSpace(diagnostic.FilePath)
+            ? string.Empty
+            : $" ({diagnostic.FilePath}:{diagnostic.Line})";
+        return $"{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}{location}";
+    }
     private static string[] ExtractGovernedBuildErrors(ValidationBuildResult build)
     {
         string[] governedDiagnostics = build.CommandReductions
@@ -633,5 +672,7 @@ public sealed class PreMergeValidationService
         bool TimedOut,
         bool Failed,
         string Output,
-        GovernedCommandReductionResult[] CommandReductions);
+        GovernedCommandReductionResult[] CommandReductions,
+        BuildDiagnostic[] BuildDiagnostics,
+        BuildProjectSummary[] BuildSummaries);
 }
