@@ -1,6 +1,7 @@
 using AICodingServices.Core;
 using AICodingServices.Indexing;
 using AICodingServices.Logging;
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Indexing.Tests;
@@ -78,7 +79,7 @@ public sealed class StagedDecisionWorkflowTests
         workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, "test launch");
         File.Copy(record.StagedFilePath, sourcePath, overwrite: true);
 
-        ReviewDecisionWithIndexRefreshResult result = new StagedDecisionWorkflow().Record(
+        ReviewDecisionWithIndexRefreshResult result = CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -91,6 +92,60 @@ public sealed class StagedDecisionWorkflowTests
         Assert.NotNull(result.IndexRefresh);
         Assert.True(result.IndexRefresh.IsError);
         Assert.Contains("index rows are stale", result.NextStep, StringComparison.OrdinalIgnoreCase);
+        Assert.True(workflowService.GetStatus(sourcePath).IndexStale);
+    }
+
+    [Fact]
+    public void Record_skips_index_refresh_when_post_accept_build_fails()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesIndexingTests", Guid.NewGuid().ToString("N"));
+        string repositoryRoot = Path.Combine(tempRoot, "Repo");
+        string runtimeRoot = Path.Combine(tempRoot, "Runtime");
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string projectPath = Path.Combine(watchedRoot, "Example.csproj");
+        string sourcePath = Path.Combine(watchedRoot, "Widget.cs");
+
+        Directory.CreateDirectory(watchedRoot);
+        File.WriteAllText(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <OutputType>Library</OutputType>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(sourcePath, "public sealed class Widget { public string Name { get; } = \"old\"; }");
+
+        MonitorSettings settings = MonitorSettings.Create(repositoryRoot, projectPath, runtimeRoot);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus refresh = workflowService.Refresh(sourcePath);
+        File.WriteAllText(refresh.WorkingFilePath, "public sealed class Widget { public string Name { get; } = \"new\"; }");
+        StagedEditRecord record = workflowService.Stage(sourcePath);
+        workflowService.RecordPreMergeValidation(
+            record.StagedRecordId,
+            new PreMergeValidationResult { Status = "passed", IsError = false },
+            forceApproved: false);
+        workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, "test launch");
+        File.Copy(record.StagedFilePath, sourcePath, overwrite: true);
+
+        ReviewDecisionWithIndexRefreshResult result = CreateWorkflow(FailingBuildRunner.Instance).Record(
+            settings,
+            NullMonitorLogger.Instance,
+            workflowService,
+            record.StagedRecordId,
+            "accepted",
+            record.StagedHash,
+            "AICodingServices.Indexing.Tests");
+
+        Assert.Equal("accepted", result.Classification);
+        Assert.NotNull(result.PostAcceptBuild);
+        Assert.True(result.PostAcceptBuild.Failed);
+        Assert.Null(result.IndexRefresh);
+        Assert.Contains("post-accept watched solution build failed", result.NextStep, StringComparison.OrdinalIgnoreCase);
         Assert.True(workflowService.GetStatus(sourcePath).IndexStale);
     }
 
@@ -131,7 +186,7 @@ public sealed class StagedDecisionWorkflowTests
         workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, "test launch");
         File.Copy(record.StagedFilePath, sourcePath, overwrite: true);
 
-        ReviewDecisionWithIndexRefreshResult result = new StagedDecisionWorkflow().Record(
+        ReviewDecisionWithIndexRefreshResult result = CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -246,7 +301,7 @@ public sealed class StagedDecisionWorkflowTests
         workflowService.RecordDiffLaunch(consumerRecord.StagedRecordId, launched: true, "test launch");
         File.Copy(providerRecord.StagedFilePath, providerPath, overwrite: true);
 
-        ReviewDecisionWithIndexRefreshResult firstAccept = new StagedDecisionWorkflow().Record(
+        ReviewDecisionWithIndexRefreshResult firstAccept = CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -259,7 +314,7 @@ public sealed class StagedDecisionWorkflowTests
         Assert.Equal("deferred", firstAccept.IndexRefresh?.Status);
 
         File.Copy(consumerRecord.StagedFilePath, consumerPath, overwrite: true);
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => new StagedDecisionWorkflow().Record(
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -382,7 +437,7 @@ public sealed class StagedDecisionWorkflowTests
         workflowService.RecordDiffLaunch(consumerRecord.StagedRecordId, launched: true, "test launch");
         File.Copy(providerRecord.StagedFilePath, providerPath, overwrite: true);
 
-        ReviewDecisionWithIndexRefreshResult firstAccept = new StagedDecisionWorkflow().Record(
+        ReviewDecisionWithIndexRefreshResult firstAccept = CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -395,7 +450,7 @@ public sealed class StagedDecisionWorkflowTests
         Assert.Equal("deferred", firstAccept.IndexRefresh?.Status);
 
         File.Copy(consumerRecord.StagedFilePath, consumerPath, overwrite: true);
-        ReviewDecisionWithIndexRefreshResult terminalAccept = new StagedDecisionWorkflow().Record(
+        ReviewDecisionWithIndexRefreshResult terminalAccept = CreateWorkflow().Record(
             settings,
             NullMonitorLogger.Instance,
             workflowService,
@@ -532,6 +587,48 @@ public sealed class StagedDecisionWorkflowTests
         File.Copy(record.StagedFilePath, watchedFilePath, overwrite: true);
         workflowService.RecordDecision(record.StagedRecordId, "accepted", record.StagedHash);
         return workflowService.GetStagedRecord(record.StagedRecordId);
+    }
+
+    private static StagedDecisionWorkflow CreateWorkflow(IBuildRunner? buildRunner = null)
+    {
+        return new StagedDecisionWorkflow(buildRunner ?? PassingBuildRunner.Instance);
+    }
+
+    private sealed class PassingBuildRunner : IBuildRunner
+    {
+        public static readonly PassingBuildRunner Instance = new();
+
+        public BuildResult Run(BuildRequest request, TimeSpan timeout)
+        {
+            return CreateBuildResult(request, 0, new BuildProjectCounts(1, 1, 0, 0, 0));
+        }
+    }
+
+    private sealed class FailingBuildRunner : IBuildRunner
+    {
+        public static readonly FailingBuildRunner Instance = new();
+
+        public BuildResult Run(BuildRequest request, TimeSpan timeout)
+        {
+            return CreateBuildResult(request, 1, new BuildProjectCounts(1, 0, 1, 0, 1));
+        }
+    }
+
+    private static BuildResult CreateBuildResult(BuildRequest request, int exitCode, BuildProjectCounts counts)
+    {
+        return new BuildResult(
+            request.Phase,
+            exitCode,
+            TimedOut: false,
+            counts,
+            "dotnet build fake",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            [],
+            TimeSpan.Zero,
+            0);
     }
 
     private sealed class NullMonitorLogger : IMonitorLogger

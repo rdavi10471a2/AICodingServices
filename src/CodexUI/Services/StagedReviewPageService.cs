@@ -1,4 +1,6 @@
 using AICodingServices.Core;
+using AICodingServices.Indexing;
+using AICodingServices.Logging;
 using AICodingServices.Workflow;
 
 namespace CodexUI.Services;
@@ -59,10 +61,18 @@ public sealed class StagedReviewPageService
         }
 
         File.Copy(record.StagedFilePath, record.WatchedFilePath, overwrite: true);
-        StagedEditRecord decided = workflowService.RecordDecision(record.StagedRecordId, "accepted", record.StagedHash);
+        ReviewDecisionWithIndexRefreshResult result = CreateDecisionWorkflow().Record(
+            settings,
+            CreateLogger(),
+            workflowService,
+            record.StagedRecordId,
+            "accepted",
+            record.StagedHash,
+            nameof(CodexUI));
+        StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
         return new StagedReviewPageActionResult(
             CreateModel(decided),
-            "Accepted proposed candidate into current source.");
+            $"Accepted proposed candidate into current source. {result.NextStep}");
     }
 
     public StagedReviewPageActionResult Reject(string stagedRecordId)
@@ -72,6 +82,16 @@ public sealed class StagedReviewPageService
         return new StagedReviewPageActionResult(
             CreateModel(decided),
             "Rejected proposed candidate. Current source was left unchanged.");
+    }
+
+    private StagedDecisionWorkflow CreateDecisionWorkflow()
+    {
+        return new StagedDecisionWorkflow();
+    }
+
+    private IMonitorLogger CreateLogger()
+    {
+        return new JsonLinesMonitorLogger(MonitorLogPaths.GetDefaultLogPath(settings));
     }
 
     private static bool IsPendingSessionRecord(StagedEditRecord record)
