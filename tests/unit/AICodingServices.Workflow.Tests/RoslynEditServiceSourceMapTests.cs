@@ -68,22 +68,60 @@ public sealed class RoslynEditServiceSourceMapTests
             Environment.NewLine,
             Enumerable.Range(0, 700).Select(index => $"    public string Method{index}() => \"{index}\";"));
         SourceMapFixture fixture = CreateFixture("BigFile.cs", $$"""
-            namespace Example;
+        namespace Example;
 
-            public sealed class BigFile
-            {
-            {{members}}
-            }
-            """);
+        public sealed class BigFile
+        {
+        {{members}}
+        }
+        """);
         RoslynEditService service = new(fixture.Settings);
 
         RoslynSourceMapResult result = service.GetSourceMap(null, "project", "full");
 
         Assert.True(result.WasTruncated);
-        Assert.True(result.EstimatedTokenProxy > result.BudgetLimit);
-        Assert.Empty(result.Files);
+        Assert.NotNull(result.UntruncatedEstimatedTokenProxy);
+        Assert.True(result.UntruncatedEstimatedTokenProxy.Value > result.BudgetLimit);
+        Assert.True(result.EstimatedTokenProxy <= result.BudgetLimit);
+        RoslynSourceMapFile file = Assert.Single(result.Files);
+        Assert.Equal("BigFile.cs", file.RelativePath);
+        Assert.NotEmpty(file.Symbols);
+        Assert.True(file.Symbols.Count < 701);
         Assert.NotNull(result.SuggestedNarrowing);
         Assert.Contains(result.SuggestedNarrowing!, suggestion => suggestion.RelativePath == "BigFile.cs");
+    }
+
+    [Fact]
+    public void GetSourceMap_returns_ordered_symbol_pages_with_next_call()
+    {
+        SourceMapFixture fixture = CreateFixture("Chunked.cs", """
+        namespace Example;
+
+        public sealed class Chunked
+        {
+            public void Alpha() { }
+            public void Beta() { }
+            public void Gamma() { }
+            public void Delta() { }
+        }
+        """);
+        RoslynEditService service = new(fixture.Settings);
+
+        RoslynSourceMapResult first = service.GetSourceMap(fixture.SourceFilePath, "file", "selector", orderBy: "name", skipSymbols: 0, maxSymbols: 2);
+        RoslynSourceMapResult second = service.GetSourceMap(fixture.SourceFilePath, "file", "selector", orderBy: first.NextPage!.OrderBy, skipSymbols: first.NextPage.SkipSymbols, maxSymbols: first.NextPage.MaxSymbols);
+
+        Assert.Equal("name", first.Page!.OrderBy);
+        Assert.Equal(0, first.Page.SkipSymbols);
+        Assert.Equal(2, first.Page.ReturnedSymbols);
+        Assert.True(first.Page.HasMore);
+        Assert.NotNull(first.NextPage);
+        Assert.Equal(2, first.NextPage.SkipSymbols);
+        Assert.Contains(first.SuggestedNextCalls!, call =>
+            call.Tool == "get_source_map"
+            && call.Arguments["skipSymbols"] == "2"
+            && call.Arguments["maxSymbols"] == "2");
+        Assert.Equal(new[] { "Alpha", "Beta" }, first.Files.SelectMany(file => file.Symbols).Select(symbol => symbol.Name).ToArray());
+        Assert.Equal(new[] { "Chunked", "Delta" }, second.Files.SelectMany(file => file.Symbols).Select(symbol => symbol.Name).ToArray());
     }
 
     [Fact]

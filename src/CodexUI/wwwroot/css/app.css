@@ -454,6 +454,16 @@ h2 {
     padding: 4px 4px 8px 0;
 }
 
+.demo-heading {
+    border-top: 1px solid #e3e8ee;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.demo-tree-list {
+    max-height: 32%;
+}
+
 .tree-folder {
     border-radius: 5px;
     min-width: 0;
@@ -623,6 +633,22 @@ h2 {
 
 .source-toolbar h2 {
     margin-bottom: 5px;
+}
+
+.source-toolbar-actions {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.danger-action {
+    border-color: #f0c4c4;
+    color: #b53d4b;
+}
+
+.danger-action:hover {
+    background: #fff1f1;
 }
 
 .source-toolbar span {

@@ -165,12 +165,14 @@ public sealed class LocalCodingServicesSessionStartupRuntime : ICodingServicesSe
         CodingServicesStartupPaths paths,
         CancellationToken cancellationToken)
     {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        if (!File.Exists(paths.DirectBridgeDllPath))
+                Stopwatch stopwatch = Stopwatch.StartNew();
+        EnsureDirectBridgeCurrentCopy(paths);
+
+        if (!File.Exists(paths.DirectBridgeCurrentDllPath))
         {
             return new CodingServicesDirectBridgeProbeResult(
                 CodingServicesProbeState.Missing,
-                $"Direct bridge DLL was not found at {paths.DirectBridgeDllPath}.",
+                $"Direct bridge current copy was not found at {paths.DirectBridgeCurrentDllPath}. Build output source: {paths.DirectBridgeBuildOutputDirectory}.",
                 null,
                 stopwatch.ElapsedMilliseconds);
         }
@@ -185,13 +187,14 @@ public sealed class LocalCodingServicesSessionStartupRuntime : ICodingServicesSe
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
-                WorkingDirectory = paths.RepositoryRoot
+                WorkingDirectory = paths.DirectBridgeCurrentDirectory
             };
-            process.StartInfo.ArgumentList.Add(paths.DirectBridgeDllPath);
+            process.StartInfo.ArgumentList.Add(paths.DirectBridgeCurrentDllPath);
             process.StartInfo.ArgumentList.Add("--repo-root");
             process.StartInfo.ArgumentList.Add(paths.RepositoryRoot);
             process.StartInfo.ArgumentList.Add("--config");
             process.StartInfo.ArgumentList.Add(paths.SettingsPath);
+
 
             if (!process.Start())
             {
@@ -270,7 +273,41 @@ public sealed class LocalCodingServicesSessionStartupRuntime : ICodingServicesSe
         }
     }
 
-    private static async Task WriteFramedMessageAsync(Stream output, string json, CancellationToken cancellationToken)
+        private static void EnsureDirectBridgeCurrentCopy(CodingServicesStartupPaths paths)
+    {
+        if (!Directory.Exists(paths.DirectBridgeBuildOutputDirectory))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(paths.DirectBridgeCurrentDirectory);
+        foreach (string sourcePath in Directory.EnumerateFiles(
+            paths.DirectBridgeBuildOutputDirectory,
+            "*",
+            SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(paths.DirectBridgeBuildOutputDirectory, sourcePath);
+            string targetPath = Path.Combine(paths.DirectBridgeCurrentDirectory, relativePath);
+            string? targetDirectory = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                Directory.CreateDirectory(targetDirectory);
+            }
+
+            try
+            {
+                File.Copy(sourcePath, targetPath, overwrite: true);
+            }
+            catch (IOException) when (File.Exists(targetPath))
+            {
+            }
+            catch (UnauthorizedAccessException) when (File.Exists(targetPath))
+            {
+            }
+        }
+    }
+
+private static async Task WriteFramedMessageAsync(Stream output, string json, CancellationToken cancellationToken)
     {
         byte[] payload = Encoding.UTF8.GetBytes(json);
         byte[] header = Encoding.ASCII.GetBytes($"{CodingServicesMcpBridgeProtocol.ContentLengthHeaderName}: {payload.Length}\r\n\r\n");

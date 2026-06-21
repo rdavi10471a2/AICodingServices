@@ -10,4 +10,12 @@ public sealed record SourceTreeNodeViewModel(
     int Line,
     string Kind,
     IReadOnlyList<SourceTreeNodeViewModel> Children,
-    IReadOnlyList<SourceOutlineNodeViewModel> Outline);
+    IReadOnlyList<SourceOutlineNodeViewModel> Outline,
+    string LinkKind = SourceTreeLinkKind.Watched);
+
+public static class SourceTreeLinkKind
+{
+    public const string Watched = "watched";
+
+    public const string Demo = "demo";
+}

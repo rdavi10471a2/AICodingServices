@@ -1,3 +1,4 @@
+using AICodingServices.Core;
 using CodexUI.Components;
 using CodexUI.Data.Repositories;
 using AICodingServices.McpHub;
@@ -41,6 +42,7 @@ public static class Program
         builder.Services.AddSingleton<WorkspaceRepository>();
         builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();
         builder.Services.AddSingleton<ICodexUsageSummaryService, CodexUsageSummaryService>();
+        builder.Services.AddSingleton(services => new DemoWorkspaceService(services.GetRequiredService<ICodexUiMonitorSettingsProvider>().GetSettings()));
         builder.Services.AddSingleton<LiveMcpTelemetryService>();
         builder.Services.AddSingleton<IMcpTelemetrySink>(
             services => services.GetRequiredService<LiveMcpTelemetryService>());

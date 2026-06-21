@@ -557,6 +557,47 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.Contains(result.OverlayValidation.Diagnostics, diagnostic => diagnostic.Id == "CS0103");
     }
 
+    [Fact]
+    public void Roslyn_submit_symbol_preserves_existing_attributes_and_documentation()
+    {
+        WorkflowFixture fixture = CreateFixture();
+        File.WriteAllText(
+            fixture.ProgramFilePath,
+            """
+        namespace Example;
+
+        internal static class Program
+        {
+            /// <summary>
+            /// Keep this doc.
+            /// </summary>
+            [Obsolete("keep")]
+            public static string Value()
+            {
+                return "original";
+            }
+        }
+        """);
+        WorkflowEditService service = new(fixture.Settings);
+        service.Refresh(fixture.ProgramFilePath);
+        RoslynEditService roslyn = new(fixture.Settings);
+
+        RoslynEditResult result = roslyn.SubmitSymbol(
+            fixture.ProgramFilePath,
+            """{"name":"Value","memberKind":"method","containingType":"Program"}""",
+            """
+        public static string Value()
+        {
+            return "candidate";
+        }
+        """);
+
+        string content = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("/// <summary>", content, StringComparison.Ordinal);
+        Assert.Contains("[Obsolete(\"keep\")]", content, StringComparison.Ordinal);
+        Assert.Contains("return \"candidate\";", content, StringComparison.Ordinal);
+    }
+
 
     [Fact]
     public void PreMergeValidation_uses_real_tree_overlay_for_test_project_edits()

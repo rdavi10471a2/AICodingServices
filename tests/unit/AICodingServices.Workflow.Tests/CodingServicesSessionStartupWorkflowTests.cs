@@ -166,6 +166,33 @@ public sealed class CodingServicesSessionStartupWorkflowTests
         Assert.Equal(2, runtime.SiteProbeCalls);
     }
 
+    [Fact]
+        public void Startup_paths_use_current_bridge_copy_for_direct_bridge_command()
+    {
+        CodingServicesStartupPaths paths = CodingServicesStartupPaths.Create(
+            @"C:\Repo",
+            @"C:\Repo\config\appsettings.json",
+            "http://localhost:5000/");
+
+        Assert.EndsWith(
+            @"src\AICodingServices.McpStdioBridge\AICodingServices.McpStdioBridge.csproj",
+            paths.DirectBridgeProjectPath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(
+            @"runtime\mcp-bridge\current",
+            paths.DirectBridgeCurrentDirectory,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(
+            @"runtime\mcp-bridge\current\AICodingServices.McpStdioBridge.dll",
+            paths.DirectBridgeCurrentDllPath,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"bin\Debug", paths.DirectBridgeCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("dotnet run --project", paths.DirectBridgeCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(paths.DirectBridgeCurrentDllPath, paths.DirectBridgeCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(" --repo-root ", paths.DirectBridgeCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(" --config ", paths.DirectBridgeCommand, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class FakeRuntime : ICodingServicesSessionStartupRuntime
     {
         public List<CodingServicesProcessDescriptor> RunningProcesses { get; } = [];

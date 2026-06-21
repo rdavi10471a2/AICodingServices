@@ -2,6 +2,8 @@
 @inject IWatchedSolutionViewService WatchedSolutionViewService
 @inject IWorkspaceStatusService WorkspaceStatusService
 @inject SourceNavigationState SourceNavigationState
+@inject AICodingServices.Core.DemoWorkspaceService DemoWorkspaceService
+@inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 
 <PageTitle>Watched Solution</PageTitle>
@@ -34,6 +36,17 @@
                     <SourceTreeNode Node="@node" />
                 }
             </nav>
+
+            <div class="panel-heading demo-heading">
+                <h2>Local Demos</h2>
+                <span>@model.DemoFiles.Count</span>
+            </div>
+            <nav class="source-tree-list demo-tree-list">
+                @foreach (SourceTreeNodeViewModel node in model.DemoTree)
+                {
+                    <SourceTreeNode Node="@node" />
+                }
+            </nav>
         </aside>
 
         <section class="source-view">
@@ -50,7 +63,13 @@
                     <div>
                         <h2>@model.SelectedFile.RelativePath</h2>
                     </div>
-                    <strong>@model.SelectedFile.Language</strong>
+                    <div class="source-toolbar-actions">
+                        @if (model.IsDemoSelected)
+                        {
+                            <button class="secondary-action danger-action" type="button" @onclick="DeleteSelectedDemoAsync">Delete</button>
+                        }
+                        <strong>@model.SelectedFile.Language</strong>
+                    </div>
                 </div>
 
                 <MonacoSourceEditor File="@model.SelectedFile" />
@@ -83,15 +102,40 @@
     [SupplyParameterFromQuery(Name = "line")]
     public int? Line { get; set; }
 
+    [SupplyParameterFromQuery(Name = "demoPath")]
+    public string? DemoPath { get; set; }
+
     private WatchedSolutionViewModel model = WatchedSolutionViewModel.Empty;
     private bool isRebuildingIndex;
 
     protected override void OnParametersSet()
     {
+        RefreshModel();
+    }
+
+    private void RefreshModel()
+    {
         string? selectedPath = SourceNavigationState.ResolvePath(Path);
         int? selectedLine = SourceNavigationState.ResolveLine(Line);
-        model = WatchedSolutionViewService.GetView(selectedPath, selectedLine);
-        SourceNavigationState.Remember(model.SelectedFile?.RelativePath, model.SelectedFile?.SelectedLine);
+        model = WatchedSolutionViewService.GetView(selectedPath, selectedLine, DemoPath);
+        if (!model.IsDemoSelected)
+        {
+            SourceNavigationState.Remember(model.SelectedFile?.RelativePath, model.SelectedFile?.SelectedLine);
+        }
+    }
+
+    private Task DeleteSelectedDemoAsync()
+    {
+        if (!model.IsDemoSelected || model.SelectedFile is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        DemoWorkspaceService.DeleteDemoFile(model.SelectedFile.RelativePath);
+        DemoPath = null;
+        RefreshModel();
+        NavigationManager.NavigateTo("/watched-solution", replace: true);
+        return Task.CompletedTask;
     }
 
     private async Task RebuildIndexAsync()
@@ -105,10 +149,7 @@
         try
         {
             await WorkspaceStatusService.RebuildIndexAsync(CancellationToken.None);
-            string? selectedPath = SourceNavigationState.ResolvePath(Path);
-            int? selectedLine = SourceNavigationState.ResolveLine(Line);
-            model = WatchedSolutionViewService.GetView(selectedPath, selectedLine);
-            SourceNavigationState.Remember(model.SelectedFile?.RelativePath, model.SelectedFile?.SelectedLine);
+            RefreshModel();
         }
         finally
         {

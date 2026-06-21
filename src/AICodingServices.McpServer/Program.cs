@@ -12,7 +12,6 @@ using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -33,6 +32,7 @@ internal static class Program
         builder.Services.AddSingleton(SolutionIndexQueryService.Create(settings));
         builder.Services.AddSingleton(new WorkflowEditService(settings));
         builder.Services.AddSingleton(new RoslynEditService(settings));
+        builder.Services.AddSingleton(new DemoWorkspaceService(settings));
         builder.Services.AddSingleton(new WorkflowEditPaths(settings));
         builder.Services.AddSingleton<AICodingServicesMcpRuntimeState>();
         builder.Services
@@ -76,6 +76,10 @@ public sealed class AICodingServicesTools
     private readonly SolutionIndexQueryService queryService;
     private readonly WorkflowEditService workflowService;
     private readonly RoslynEditService roslynEditService;
+
+    private readonly SessionIntentPolicyService sessionIntentPolicyService = new();
+
+    private readonly DemoWorkspaceService demoWorkspaceService;
     private readonly WorkflowEditPaths workflowPaths;
     private readonly AICodingServicesMcpRuntimeState runtimeState;
     private readonly IHostApplicationLifetime applicationLifetime;
@@ -86,6 +90,7 @@ public sealed class AICodingServicesTools
         SolutionIndexQueryService queryService,
         WorkflowEditService workflowService,
         RoslynEditService roslynEditService,
+        DemoWorkspaceService demoWorkspaceService,
         WorkflowEditPaths workflowPaths,
         AICodingServicesMcpRuntimeState runtimeState,
         IHostApplicationLifetime applicationLifetime,
@@ -95,6 +100,7 @@ public sealed class AICodingServicesTools
         this.queryService = queryService;
         this.workflowService = workflowService;
         this.roslynEditService = roslynEditService;
+        this.demoWorkspaceService = demoWorkspaceService;
         this.workflowPaths = workflowPaths;
         this.runtimeState = runtimeState;
         this.applicationLifetime = applicationLifetime;
@@ -219,9 +225,21 @@ public sealed class AICodingServicesTools
 
     [McpServerTool]
     [Description("Rebuild the monitor-owned SQLite index for the watched solution.")]
-    public async Task<AICodingServicesRefreshIndexResult> RefreshSolutionIndex()
+    public async Task<object> RefreshSolutionIndex()
     {
         runtimeState.Touch();
+        try
+        {
+            return await RefreshSolutionIndexCore();
+        }
+        catch (Exception ex) when (IsExpectedToolFailure(ex))
+        {
+            return CreateToolError(ex, "The solution index rebuild should complete or return a structured failure with the exception message.");
+        }
+    }
+
+    private async Task<AICodingServicesRefreshIndexResult> RefreshSolutionIndexCore()
+    {
         Stopwatch stopwatch = Stopwatch.StartNew();
         SolutionIndexSummary summary = await new SolutionIndexRebuildService().RebuildAsync(settings);
         stopwatch.Stop();
@@ -230,11 +248,23 @@ public sealed class AICodingServicesTools
 
     [McpServerTool]
     [Description("Refresh one watched C# file in the monitor-owned SQLite solution index. AICodingServices currently rebuilds the semantic index and returns the requested file slice.")]
-    public async Task<AICodingServicesRefreshIndexFileResult> RefreshSolutionIndexFile(
+    public async Task<object> RefreshSolutionIndexFile(
         [Description("Watched C# file path, absolute or relative to the watched solution folder.")] string path)
     {
         runtimeState.Touch();
-        AICodingServicesRefreshIndexResult refresh = await RefreshSolutionIndex();
+        try
+        {
+            return await RefreshSolutionIndexFileCore(path);
+        }
+        catch (Exception ex) when (IsExpectedToolFailure(ex))
+        {
+            return CreateToolError(ex, "The file index refresh should complete or return a structured failure with the exception message.", path);
+        }
+    }
+
+    private async Task<AICodingServicesRefreshIndexFileResult> RefreshSolutionIndexFileCore(string path)
+    {
+        AICodingServicesRefreshIndexResult refresh = await RefreshSolutionIndexCore();
         IndexedFileDetailResult detail = queryService.GetFileDetail(path);
         return new AICodingServicesRefreshIndexFileResult(
             refresh.Summary,
@@ -252,7 +282,7 @@ public sealed class AICodingServicesTools
     {
         runtimeState.Touch();
         EditSessionStatus refresh = workflowService.Refresh(ResolveWatchedPath(sourceFilePath));
-        AICodingServicesRefreshIndexFileResult index = await RefreshSolutionIndexFile(sourceFilePath);
+        AICodingServicesRefreshIndexFileResult index = await RefreshSolutionIndexFileCore(sourceFilePath);
         return new AICodingServicesRefreshFileAndIndexResult(refresh, index);
     }
 
@@ -393,9 +423,9 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Create a durable monitor session handle and declare the watched files planned for this edit session.")]
+    [Description("Create a durable monitor session and declare per-file edit intent before mutation. Include targetKind, changeKind, expectedShape, risk, and discoveryAlreadyDone so MCP can derive legal edit tools.")]
     public AICodingServicesSessionState StartMonitorSession(
-        [Description("Planned watched files and their MSBuild owning projects. At least one file is required.")] IReadOnlyList<AICodingServicesSessionPlannedFileInput> filesPlanned,
+        [Description("Planned watched files with owning project and intent fields. For C# method replacement use expectedShape=MethodReplacement; for markup/config use explicit targetKind.")] IReadOnlyList<AICodingServicesSessionPlannedFileInput> filesPlanned,
         [Description("Short purpose for this monitor session.")] string purpose = "monitor workflow")
     {
         runtimeState.Touch();
@@ -419,10 +449,10 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Replace the watched files planned for this monitor edit session after explicit operator correction.")]
+    [Description("Replace the planned-file intent set after explicit operator correction. Updating the plan changes the derived edit-family policy for later mutation tools.")]
     public AICodingServicesSessionState SetMonitorSessionEditPlan(
         [Description("Session handle returned by start_monitor_session.")] string sessionId,
-        [Description("Planned watched files and their MSBuild owning projects.")] IReadOnlyList<AICodingServicesSessionPlannedFileInput> filesPlanned)
+        [Description("Replacement planned watched files with owning project and intent fields used to derive edit-family policy.")] IReadOnlyList<AICodingServicesSessionPlannedFileInput> filesPlanned)
     {
         runtimeState.Touch();
         AICodingServicesSessionState session = GetMonitorSession(sessionId);
@@ -502,46 +532,84 @@ public sealed class AICodingServicesTools
     [McpServerTool]
     [Description("Refresh a watched source file into the monitor-owned Working folder and clear candidate state for that file.")]
     public EditSessionStatus RefreshFile(
-        [Description("Source file path, absolute or relative to the watched solution folder.")] string sourceFilePath)
+        [Description("Source file path, absolute or relative to the watched solution folder.")] string sourceFilePath,
+        [Description("Session handle returned by start_monitor_session.")] string sessionId)
     {
         runtimeState.Touch();
-        return workflowService.Refresh(ResolveWatchedPath(sourceFilePath));
+        string fullPath = ResolveWatchedPath(sourceFilePath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.Refresh);
+        EditSessionStatus status = workflowService.Refresh(fullPath);
+        RecordMonitorSessionEvent(sessionId, "refresh-file", status.WatchedFilePath, JsonSerializer.Serialize(status, JsonOptions));
+        return status;
     }
 
     [McpServerTool]
     [Description("Create a new-file edit session with an empty monitor-owned Working candidate. Watched source is not created.")]
     public EditSessionStatus NewFile(
         [Description("Future watched source path, absolute or relative to the watched solution folder.")] string sourceFilePath,
-        [Description("Optional durable session handle for ownership/telemetry.")] string? sessionId = null)
+        [Description("Session handle returned by start_monitor_session.")] string sessionId)
     {
         runtimeState.Touch();
-        EditSessionStatus status = workflowService.NewFile(ResolveWatchedPath(sourceFilePath));
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            RecordMonitorSessionEvent(sessionId, "new-file", status.WatchedFilePath, JsonSerializer.Serialize(status, JsonOptions));
-        }
-
+        string fullPath = ResolveWatchedPath(sourceFilePath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.Refresh);
+        EditSessionStatus status = workflowService.NewFile(fullPath);
+        RecordMonitorSessionEvent(sessionId, "new-file", status.WatchedFilePath, JsonSerializer.Serialize(status, JsonOptions));
         return status;
     }
 
     [McpServerTool]
-    [Description("Read a watched source file through the Monitor MCP server.")]
+    [Description("Read a watched source file through the Monitor MCP server and record it against a monitor session.")]
     public AICodingServicesFileReadResult GetFile(
         [Description("Source file path, absolute or relative to the watched solution folder.")] string sourceFilePath,
-        [Description("Optional session handle. When supplied, records that the file was fetched.")] string? sessionId = null)
+        [Description("Session handle returned by start_monitor_session.")] string sessionId)
     {
         runtimeState.Touch();
         string path = ResolveWatchedPath(sourceFilePath);
+        EnsurePlannedMutationAllowed(sessionId, path, SessionEditOperationFamily.Read);
         string text = File.ReadAllText(path);
         AICodingServicesFileHashInfo hashInfo = GetFileHashInfo(path);
-        AICodingServicesSessionFileAccess? access = null;
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            access = RecordSessionFileAccess(sessionId, path, "read", hashInfo);
-            RecordMonitorSessionEvent(sessionId, "file-fetch", path, JsonSerializer.Serialize(hashInfo, JsonOptions));
-        }
-
+        AICodingServicesSessionFileAccess access = RecordSessionFileAccess(sessionId, path, "read", hashInfo);
+        RecordMonitorSessionEvent(sessionId, "file-fetch", path, JsonSerializer.Serialize(hashInfo, JsonOptions));
         return new AICodingServicesFileReadResult(path, workflowPaths.GetRelativeWatchedPath(path), hashInfo, access, text);
+    }
+    [McpServerTool]
+    [Description("Create or update a local demo/proposal file under runtime/demos. Demo files are MCP-owned communication artifacts and are not watched source or staged review candidates.")]
+    public DemoWorkspaceWriteResult WriteDemoFile(
+    [Description("Demo file path relative to runtime/demos, such as proposals/example.md.")] string relativePath,
+    [Description("Complete demo/proposal file content.")] string content,
+    [Description("Short purpose shown in the Source page and demo metadata.")] string? purpose = null,
+    [Description("Optional author label. Defaults to agent.")] string? author = null,
+    [Description("Optional watched source paths this demo relates to.")] IReadOnlyList<string>? relatedSourcePaths = null)
+    {
+        runtimeState.Touch();
+        return demoWorkspaceService.WriteDemoFile(relativePath, content, purpose, author, relatedSourcePaths);
+    }
+
+    [McpServerTool]
+    [Description("Delete a local demo/proposal file under runtime/demos, including its metadata sidecar when present.")]
+    public DemoWorkspaceDeleteResult DeleteDemoFile(
+    [Description("Demo file path relative to runtime/demos.")] string relativePath)
+    {
+        runtimeState.Touch();
+        return demoWorkspaceService.DeleteDemoFile(relativePath);
+    }
+
+    [McpServerTool]
+    [Description("Read a local demo/proposal file from runtime/demos by relative path.")]
+    public DemoWorkspaceFile ReadDemoFile(
+    [Description("Demo file path relative to runtime/demos.")] string relativePath)
+    {
+        runtimeState.Touch();
+        return demoWorkspaceService.ReadDemoFile(relativePath);
+    }
+
+    [McpServerTool]
+    [Description("List local demo/proposal files under runtime/demos without returning file content.")]
+    public IReadOnlyList<DemoWorkspaceFileSummary> ListDemoFiles(
+    [Description("Maximum demo files to return.")] int maxResults = 200)
+    {
+        runtimeState.Touch();
+        return demoWorkspaceService.ListDemoFiles(maxResults);
     }
 
     [McpServerTool]
@@ -604,13 +672,16 @@ public sealed class AICodingServicesTools
         [Description("Source map scope: auto, file, folder, namespace, or project.")] string scope = "auto",
         [Description("Source map density: auto, navigation, selector, detail, or full.")] string mode = "auto",
         [Description("Optional namespace text when scope is namespace.")] string? namespaceName = null,
+        [Description("Symbol ordering for chunked results: declaration, name, type-then-member, edit-priority, or diagnostics.")] string orderBy = "declaration",
+        [Description("Number of ordered symbols to skip before returning this source-map page.")] int skipSymbols = 0,
+        [Description("Maximum symbols to return in this source-map page. Use 0 for automatic budgeted behavior.")] int maxSymbols = 0,
         [Description("Optional durable session handle for ownership/telemetry.")] string? sessionId = null)
     {
         runtimeState.Touch();
         RoslynSourceMapResult result;
         try
         {
-            result = roslynEditService.GetSourceMap(path, scope, mode, namespaceName);
+            result = roslynEditService.GetSourceMap(path, scope, mode, namespaceName, orderBy, skipSymbols, maxSymbols);
         }
         catch (InvalidOperationException ex) when (IsRecoverableRoslynGuidanceError(ex))
         {
@@ -672,37 +743,33 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Write a full-file candidate into the monitor-owned Working mirror. Does not create a staged record.")]
+    [Description("Write a full-file candidate into Working. Policy: use for new files, generated files, or explicit whole-file fallbacks; existing C# source normally blocks this edit family.")]
     public EditSessionStatus SubmitFile(
         [Description("Source file path, absolute or relative to the watched solution folder.")] string path,
         [Description("Complete replacement file content.")] string content,
-        [Description("Optional durable session handle for ownership/telemetry.")] string? sessionId = null,
+        [Description("Session handle returned by start_monitor_session.")] string sessionId,
         [Description("Optional JSON manifest expressing model intent.")] string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.WholeFile, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         EditSessionStatus status = workflowService.SubmitFile(fullPath, content, manifestJson, !deferOverlayValidation);
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            RecordMonitorSessionEvent(sessionId, "submit-file", fullPath, manifestJson);
-        }
-
+        RecordMonitorSessionEvent(sessionId, "submit-file", fullPath, manifestJson);
         return status;
     }
 
     [McpServerTool]
-    [Description("Replace exact oldText in the monitor-owned Working mirror candidate.")]
+    [Description("Replace exact oldText in Working. Policy: normal for Markdown/Razor/markup/config; blocked for existing C# source unless the session policy explicitly allows text fallback.")]
     public ReplaceTextResult ReplaceTextInFile(
         [Description("Source file path, absolute or relative to the watched solution folder.")] string path,
         [Description("Exact old text to replace using ordinal matching.")] string oldText,
         [Description("Replacement text.")] string newText,
+        [Description("Session handle returned by start_monitor_session.")] string sessionId,
         [Description("Required number of matches in the current edit base. Leave -1 for unique replacement when occurrenceIndex is unset, or no total-match assertion when occurrenceIndex is set.")] int expectedMatches = -1,
         [Description("Optional 0-based occurrence index. Leave -1 for unique/global replacement; set 0 or greater to replace one occurrence without requiring unique oldText.")] int occurrenceIndex = -1,
         [Description("Optional SHA-256 hash of the current Working candidate.")] string? expectedFileHash = null,
         [Description("Optional SHA-256 hash of oldText.")] string? expectedOldTextHash = null,
-        [Description("Optional durable session handle.")] string? sessionId = null,
         [Description("Optional JSON manifest expressing model intent.")] string? manifestJson = null)
     {
         runtimeState.Touch();
@@ -717,7 +784,7 @@ public sealed class AICodingServicesTools
             : occurrenceIndex >= 0 ? null : 1;
 
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.TextReplace, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         ReplaceTextResult result = workflowService.ReplaceText(
             fullPath,
@@ -728,11 +795,7 @@ public sealed class AICodingServicesTools
             occurrenceIndex >= 0 ? occurrenceIndex : null,
             manifestJson,
             !deferOverlayValidation);
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            RecordMonitorSessionEvent(sessionId, "replace-text-in-file", result.WatchedFilePath, JsonSerializer.Serialize(result, JsonOptions));
-        }
-
+        RecordMonitorSessionEvent(sessionId, "replace-text-in-file", result.WatchedFilePath, JsonSerializer.Serialize(result, JsonOptions));
         return result;
     }
 
@@ -753,7 +816,7 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Replace an exact 1-based line/column span in the monitor-owned Working mirror candidate.")]
+    [Description("Replace an exact 1-based line/column span in Working. Policy: bounded fallback for C# when Roslyn selectors are unsuitable; normal bounded edit for text/config/markup.")]
     public EditSessionStatus ReplaceSpanInFile(
         [Description("Source file path, absolute or relative to the watched solution folder.")] string path,
         [Description("1-based start line.")] int startLine,
@@ -761,15 +824,15 @@ public sealed class AICodingServicesTools
         [Description("1-based exclusive end line.")] int endLine,
         [Description("1-based exclusive end column.")] int endColumn,
         [Description("Replacement text.")] string newText,
+        [Description("Session handle returned by start_monitor_session.")] string sessionId,
         [Description("Optional SHA-256 hash of the current Working candidate.")] string? expectedFileHash = null,
         [Description("Optional SHA-256 hash of the extracted old span text.")] string? expectedOldTextHash = null,
         [Description("Optional exact old span text.")] string? expectedOldText = null,
-        [Description("Optional durable session handle.")] string? sessionId = null,
         [Description("Optional JSON manifest expressing model intent.")] string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.Span, manifestJson);
         EnsureSession(fullPath);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         EditSessionStatus status = workflowService.ReplaceSpan(
@@ -784,11 +847,7 @@ public sealed class AICodingServicesTools
             expectedOldText,
             manifestJson,
             !deferOverlayValidation);
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            RecordMonitorSessionEvent(sessionId, "replace-span-in-file", status.WatchedFilePath, null);
-        }
-
+        RecordMonitorSessionEvent(sessionId, "replace-span-in-file", status.WatchedFilePath, null);
         return status;
     }
 
@@ -796,19 +855,16 @@ public sealed class AICodingServicesTools
     [Description("Stage the current Working mirror candidate for review. This creates one immutable staged record from the completed candidate.")]
     public AICodingServicesStageCandidateResult StageCandidateForReview(
         [Description("Source file path, absolute or relative to the watched solution folder.")] string path,
+        [Description("Session handle returned by start_monitor_session.")] string sessionId,
         [Description("Optional compact ledger summary.")] string? ledgerSummary = null,
-        [Description("Optional durable session handle.")] string? sessionId = null,
         [Description("Optional JSON manifest expressing model intent.")] string? manifestJson = null,
         [Description("Return the full staged record inline for debugging. Defaults to compact response.")] bool verbose = false)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.Stage, manifestJson);
         StagedEditRecord record = workflowService.Stage(fullPath, ledgerSummary, sessionId);
-        if (!string.IsNullOrWhiteSpace(sessionId))
-        {
-            RecordMonitorSessionEvent(sessionId, "stage-candidate-for-review", record.StagedRecordId, JsonSerializer.Serialize(record, JsonOptions));
-        }
+        RecordMonitorSessionEvent(sessionId, "stage-candidate-for-review", record.StagedRecordId, JsonSerializer.Serialize(record, JsonOptions));
 
         StagedEditSummary summary = workflowService.CreateSummary(record);
         return new AICodingServicesStageCandidateResult(
@@ -823,12 +879,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Replace one C# symbol in the monitor-owned Working candidate using a Roslyn selector.")]
-    public RoslynEditResult SubmitSymbol(string path, string symbolSelectorJson, string code, string? sessionId = null, string? manifestJson = null)
+    [Description("Replace one C# symbol in Working using a Roslyn selector. Preferred for C# method replacement, method-body, signature, and symbol edits.")]
+    public RoslynEditResult SubmitSymbol(string path, string symbolSelectorJson, string code, string sessionId, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.SubmitSymbol(fullPath, symbolSelectorJson, code, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "submit-symbol", result);
@@ -836,12 +892,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a using directive to the monitor-owned Working candidate.")]
-    public RoslynEditResult AddUsing(string path, string @namespace, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a using directive to Working through the Roslyn edit family. Preferred for C# source changes.")]
+    public RoslynEditResult AddUsing(string path, string @namespace, string sessionId, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddUsing(fullPath, @namespace, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-using", result);
@@ -849,12 +905,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Remove a using directive from the monitor-owned Working candidate.")]
-    public RoslynEditResult RemoveUsing(string path, string @namespace, string? sessionId = null, string? manifestJson = null)
+    [Description("Remove a using directive from Working through the Roslyn edit family. Preferred for C# source changes.")]
+    public RoslynEditResult RemoveUsing(string path, string @namespace, string sessionId, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.RemoveUsing(fullPath, @namespace, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "remove-using", result);
@@ -862,12 +918,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add or remove the partial modifier on a C# type in the monitor-owned Working candidate.")]
-    public RoslynEditResult SetTypePartial(string path, string containingType, bool isPartial, string? sessionId = null, string? manifestJson = null)
+    [Description("Add or remove the partial modifier on a C# type in Working through the Roslyn edit family.")]
+    public RoslynEditResult SetTypePartial(string path, string containingType, bool isPartial, string sessionId, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.SetTypePartial(fullPath, containingType, isPartial, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "set-type-partial", result);
@@ -875,12 +931,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# member or nested type to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddSymbol(string path, string containingType, string symbolType, string code, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# member or nested type to a containing type in Working. Preferred over text/span edits for C# symbol additions.")]
+    public RoslynEditResult AddSymbol(string path, string containingType, string symbolType, string code, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddSymbol(fullPath, containingType, symbolType, code, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-symbol", result);
@@ -888,12 +944,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# field to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddField(string path, string containingType, string declaration, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# field to a containing type in Working through the Roslyn edit family.")]
+    public RoslynEditResult AddField(string path, string containingType, string declaration, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddField(fullPath, containingType, declaration, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-field", result);
@@ -901,12 +957,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# property to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddProperty(string path, string containingType, string declaration, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# property to a containing type in Working through the Roslyn edit family.")]
+    public RoslynEditResult AddProperty(string path, string containingType, string declaration, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddProperty(fullPath, containingType, declaration, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-property", result);
@@ -914,12 +970,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# method to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddMethod(string path, string containingType, string declaration, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# method to a containing type in Working through the Roslyn edit family; preferred for C# method additions.")]
+    public RoslynEditResult AddMethod(string path, string containingType, string declaration, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddMethod(fullPath, containingType, declaration, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-method", result);
@@ -927,12 +983,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# constructor to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddConstructor(string path, string containingType, string declaration, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# constructor to a containing type in Working through the Roslyn edit family.")]
+    public RoslynEditResult AddConstructor(string path, string containingType, string declaration, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddConstructor(fullPath, containingType, declaration, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-constructor", result);
@@ -940,12 +996,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Add a C# nested type to a containing type in the monitor-owned Working candidate.")]
-    public RoslynEditResult AddNestedType(string path, string containingType, string declaration, string? afterSymbol = null, string? sessionId = null, string? manifestJson = null)
+    [Description("Add a C# nested type to a containing type in Working through the Roslyn edit family.")]
+    public RoslynEditResult AddNestedType(string path, string containingType, string declaration, string sessionId, string? afterSymbol = null, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.AddNestedType(fullPath, containingType, declaration, afterSymbol, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "add-nested-type", result);
@@ -953,12 +1009,12 @@ public sealed class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Remove one C# symbol from the monitor-owned Working candidate using a Roslyn selector.")]
-    public RoslynEditResult RemoveSymbol(string path, string symbolSelectorJson, string? sessionId = null, string? manifestJson = null)
+    [Description("Remove one C# symbol from Working using a Roslyn selector. Preferred over text/span edits for C# symbol removals.")]
+    public RoslynEditResult RemoveSymbol(string path, string symbolSelectorJson, string sessionId, string? manifestJson = null)
     {
         runtimeState.Touch();
         string fullPath = ResolveWatchedPath(path);
-        EnsurePlannedMutationAllowed(sessionId, fullPath);
+        EnsurePlannedMutationAllowed(sessionId, fullPath, SessionEditOperationFamily.RoslynSymbol, manifestJson);
         bool deferOverlayValidation = ShouldDeferPlannedOverlayValidation(sessionId, fullPath);
         RoslynEditResult result = roslynEditService.RemoveSymbol(fullPath, symbolSelectorJson, manifestJson, !deferOverlayValidation);
         RecordRoslynSessionEvent(sessionId, "remove-symbol", result);
@@ -1224,7 +1280,7 @@ public sealed class AICodingServicesTools
         StringBuilder builder = new();
         builder.AppendLine("# AICodingServices MCP Tool Manifest");
         builder.AppendLine();
-        builder.AppendLine("This manifest is generated from the currently loaded AICodingServices MCP tool methods.");
+        builder.AppendLine("This manifest is generated from the currently loaded AICodingServices MCP tool methods and includes edit-family policy guidance.");
         builder.AppendLine();
         foreach (MethodInfo method in typeof(AICodingServicesTools)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public)
@@ -1256,11 +1312,11 @@ public sealed class AICodingServicesTools
         builder.AppendLine();
         builder.AppendLine("- Watched source is not edited directly by agents.");
         builder.AppendLine("- Existing files enter through `refresh_file`; future files enter through `new_file`.");
-        builder.AppendLine("- MCP edit sessions start with `start_monitor_session` and a non-empty `filesPlanned` list.");
-        builder.AppendLine("- Candidate edits happen in monitor-owned Working files.");
+        builder.AppendLine("- MCP edit sessions start with `start_monitor_session` and a non-empty `filesPlanned` list that declares per-file intent.");
+        builder.AppendLine("- Candidate edits happen in monitor-owned Working files and must use the edit family allowed by the derived session policy.");
         builder.AppendLine("- Review uses `stage_candidate_for_review`, `launch_staged_diff`, browser staged review by default, and recorded accept/reject decisions. WinMerge remains available as an explicit fallback.");
         builder.AppendLine("- Planned sessions require all planned files to be staged before review launch.");
-        builder.AppendLine("- Planned sessions defer the expensive build/index pass until all planned files are accepted/rejected.");
+        builder.AppendLine("- For C# method replacement/body/symbol work, prefer Roslyn symbol tools; use span only with a reasoned fallback, and avoid text or whole-file replacement.");
         builder.AppendLine("- Accepted decisions trigger index refresh metadata after the planned session reaches terminal decisions; refresh before editing the same watched file again.");
         return builder.ToString();
     }
@@ -1276,7 +1332,7 @@ public sealed class AICodingServicesTools
         builder.AppendLine("2. Call `start_monitor_session(filesPlanned: [...])` before editing. Include every watched file the session intends to mutate, even for one-file edits, and include `owningProjectPath` when the index cannot prove a single owner.");
         builder.AppendLine("3. Pass that same `sessionId` to `refresh_file`, `new_file`, every mutation tool, and `stage_candidate_for_review`.");
         builder.AppendLine("4. For existing files, call `refresh_file`. For future watched files, call `new_file`.");
-        builder.AppendLine("5. Edit only the monitor-owned Working candidate with `submit_file`, text/span tools, or Roslyn typed edit tools.");
+        builder.AppendLine("5. Edit only the monitor-owned Working candidate with the derived legal edit family: Roslyn symbol tools for C# symbols, bounded span/text for markup/config, and whole-file only for new files or reasoned fallbacks.");
         builder.AppendLine("6. Stage every planned file with `stage_candidate_for_review(path, sessionId)`.");
         builder.AppendLine("7. Launch review with `launch_staged_diff` for every planned staged record before recording decisions; planned sessions require the full staged file set before browser review opens.");
         builder.AppendLine("8. The operator accepts or rejects every planned file in the staged browser review. Browser review is the default watched-source mutation surface; WinMerge is an explicit fallback.");
@@ -1347,9 +1403,23 @@ public sealed class AICodingServicesTools
 
     private static bool IsNullableParameter(ParameterInfo parameter)
     {
-        return parameter.HasDefaultValue
-            || Nullable.GetUnderlyingType(parameter.ParameterType) is not null
-            || !parameter.ParameterType.IsValueType;
+        if (parameter.HasDefaultValue)
+        {
+            return true;
+        }
+
+        if (Nullable.GetUnderlyingType(parameter.ParameterType) is not null)
+        {
+            return true;
+        }
+
+        if (!parameter.ParameterType.IsValueType)
+        {
+            NullabilityInfo nullabilityInfo = new NullabilityInfoContext().Create(parameter);
+            return nullabilityInfo.ReadState == NullabilityState.Nullable;
+        }
+
+        return false;
     }
 
     private static string ToToolName(string value)
@@ -1535,21 +1605,14 @@ public sealed class AICodingServicesTools
 
         AICodingServicesSessionEditPlan? editPlan = RequireSessionEditPlan(sessionId);
         EnsurePlannedFile(editPlan, sourceFilePath);
-        string currentPath = Path.GetFullPath(sourceFilePath);
-        bool allPlannedWorkingFilesExist = editPlan.FilesPlanned.All(file =>
-        {
-            string plannedPath = Path.GetFullPath(file.SourceFilePath);
-            if (plannedPath.Equals(currentPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            return File.Exists(workflowPaths.GetWorkingFilePath(plannedPath));
-        });
-        return !allPlannedWorkingFilesExist;
+        return true;
     }
 
-    private void EnsurePlannedMutationAllowed(string? sessionId, string sourceFilePath)
+    private void EnsurePlannedMutationAllowed(
+        string? sessionId,
+        string sourceFilePath,
+        SessionEditOperationFamily operationFamily,
+        string? manifestJson = null)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
@@ -1557,7 +1620,23 @@ public sealed class AICodingServicesTools
         }
 
         AICodingServicesSessionEditPlan editPlan = RequireSessionEditPlan(sessionId);
-        EnsurePlannedFile(editPlan, sourceFilePath);
+        AICodingServicesSessionPlannedFile plannedFile = EnsurePlannedFile(editPlan, sourceFilePath);
+        SessionDerivedEditPolicy? policy = plannedFile.DerivedPolicy;
+        if (policy is null)
+        {
+            return;
+        }
+
+        SessionEditPolicyDecision decision = sessionIntentPolicyService.Evaluate(policy, operationFamily, ExtractFallbackReason(manifestJson));
+        if (!decision.Allowed)
+        {
+            throw new InvalidOperationException(decision.Message);
+        }
+    }
+
+    private void EnsurePlannedMutationAllowed(string? sessionId, string sourceFilePath)
+    {
+        EnsurePlannedMutationAllowed(sessionId, sourceFilePath, SessionEditOperationFamily.Unknown);
     }
 
     private bool ShouldDeferBuildValidationUntilAccept(StagedEditRecord stagedRecord)
@@ -1632,6 +1711,8 @@ public sealed class AICodingServicesTools
                 continue;
             }
 
+            SessionPlannedFileIntent declaredIntent = BuildPlannedFileIntent(input, sourceFilePath);
+            SessionDerivedEditPolicy derivedPolicy = sessionIntentPolicyService.DerivePolicy(declaredIntent);
             plannedFiles.Add(new AICodingServicesSessionPlannedFile(
                 sourceFilePath,
                 workflowPaths.GetRelativeWatchedPath(sourceFilePath),
@@ -1639,21 +1720,108 @@ public sealed class AICodingServicesTools
                 Path.GetFileName(sourceFilePath),
                 Path.GetFileName(owningProjectPath),
                 string.IsNullOrWhiteSpace(input.Role) ? "edit" : input.Role,
-                input.Reason ?? string.Empty));
+                input.Reason ?? string.Empty,
+                declaredIntent,
+                derivedPolicy));
         }
 
         return plannedFiles;
     }
 
-    private static void EnsurePlannedFile(AICodingServicesSessionEditPlan editPlan, string sourceFilePath)
+    private static SessionPlannedFileIntent BuildPlannedFileIntent(AICodingServicesSessionPlannedFileInput input, string sourceFilePath)
+    {
+        string targetKind = string.IsNullOrWhiteSpace(input.TargetKind)
+            ? InferTargetKind(sourceFilePath)
+            : input.TargetKind;
+        string changeKind = string.IsNullOrWhiteSpace(input.ChangeKind)
+            ? "Unknown"
+            : input.ChangeKind;
+        string expectedShape = string.IsNullOrWhiteSpace(input.ExpectedShape)
+            ? "Unknown"
+            : input.ExpectedShape;
+
+        return new SessionPlannedFileIntent(
+            targetKind,
+            changeKind,
+            expectedShape,
+            input.TargetSymbols ?? [],
+            string.IsNullOrWhiteSpace(input.Risk) ? "Unknown" : input.Risk,
+            input.DiscoveryAlreadyDone);
+    }
+
+    private static string InferTargetKind(string sourceFilePath)
+    {
+        string extension = Path.GetExtension(sourceFilePath);
+        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.CSharpSource);
+        }
+
+        if (extension.Equals(".razor", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.RazorMarkup);
+        }
+
+        if (extension.Equals(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.Markdown);
+        }
+
+        if (extension.Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.Json);
+        }
+
+        if (extension.Equals(".css", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.Css);
+        }
+
+        if (extension.Equals(".xml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".html", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cshtml", StringComparison.OrdinalIgnoreCase))
+        {
+            return nameof(SessionIntentTargetKind.Markup);
+        }
+
+        return nameof(SessionIntentTargetKind.Unknown);
+    }
+
+    private static string? ExtractFallbackReason(string? manifestJson)
+    {
+        if (string.IsNullOrWhiteSpace(manifestJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(manifestJson);
+            if (document.RootElement.TryGetProperty("fallbackReason", out JsonElement fallbackReason)
+                && fallbackReason.ValueKind == JsonValueKind.String)
+            {
+                return fallbackReason.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static AICodingServicesSessionPlannedFile EnsurePlannedFile(AICodingServicesSessionEditPlan editPlan, string sourceFilePath)
     {
         string fullPath = Path.GetFullPath(sourceFilePath);
-        bool isPlanned = editPlan.FilesPlanned.Any(file =>
+        AICodingServicesSessionPlannedFile? plannedFile = editPlan.FilesPlanned.FirstOrDefault(file =>
             Path.GetFullPath(file.SourceFilePath).Equals(fullPath, StringComparison.OrdinalIgnoreCase));
-        if (!isPlanned)
+        if (plannedFile is null)
         {
             throw new InvalidOperationException("Source file is not in the session edit plan: " + fullPath);
         }
+
+        return plannedFile;
     }
 
     private string ResolveOwningProjectPath(string sourceFilePath)
@@ -1733,6 +1901,19 @@ public sealed class AICodingServicesTools
             || ex.Message.Contains("supports C# source files only", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsExpectedToolFailure(Exception ex)
+    {
+        return ex is InvalidOperationException
+            || ex is IOException
+            || ex is FileNotFoundException
+            || ex is UnauthorizedAccessException;
+    }
+
+    private static AICodingServicesToolErrorResult CreateToolError(Exception ex, string expected, string? received = null)
+    {
+        return new AICodingServicesToolErrorResult(true, ex.Message, expected, received ?? ex.GetType().Name);
+    }
+
     private static void ValidateExpectedHash(string path, string? expectedFileHash)
     {
         if (!string.IsNullOrWhiteSpace(expectedFileHash)
@@ -1808,283 +1989,3 @@ public sealed class AICodingServicesTools
     }
 }
 
-public sealed record AICodingServicesMcpStatus(
-    string RepositoryRoot,
-    string RuntimeRoot,
-    string WatchedSolutionPath,
-    string WatchedProjectFolder,
-    string DatabasePath,
-    bool DatabaseExists,
-    int ProjectCount,
-    int DocumentCount,
-    int SymbolCount,
-    int ReferenceCount,
-    int CallSiteCount,
-    int RelationshipCount,
-    int StaleFileCount,
-    int DiagnosticCount);
-
-public sealed record AICodingServicesWorkflowStatus(
-    string WatchedSolutionPath,
-    string WatchedProjectFolder,
-    string RuntimeRoot,
-    string WorkingRoot,
-    string? ResolvedDiffToolPath,
-    IReadOnlyList<string> WinMergeCandidatePaths);
-
-public sealed record AICodingServicesToolErrorResult(
-    bool IsError,
-    string Message,
-    string Expected,
-    string? Received);
-
-public sealed record AICodingServicesIndexedReferenceResult(
-    string TargetStableKey,
-    string FilePath,
-    int Line,
-    int Column,
-    string ReferenceKind,
-    string Snippet,
-    string TargetName,
-    string TargetKind,
-    string CallerStableKey,
-    string CallerName,
-    string CallerKind);
-
-public sealed record AICodingServicesSolutionIndexTree(
-    IReadOnlyList<IndexedProjectRow> Projects,
-    IReadOnlyList<IndexedDocumentRow> Files,
-    IReadOnlyList<AICodingServicesNamespaceTree> Namespaces);
-
-public sealed record AICodingServicesNamespaceTree(
-    string Namespace,
-    IReadOnlyList<string> Files,
-    int SymbolCount);
-
-public sealed record AICodingServicesStageCandidateResult(
-    string StagedRecordId,
-    string StagedHash,
-    string Status,
-    string Classification,
-    string StagedRecordPath,
-    StagedEditSummary StagedRecordSummary,
-    StagedEditRecord? StagedRecord,
-    string NextStep);
-
-public sealed record AICodingServicesStagedDiffLaunchResult(
-    StagedEditSummary StagedRecordSummary,
-    StagedEditRecord? StagedRecord,
-    PreMergeValidationResult PreMergeValidation,
-    GovernedCommandReductionResult[] CommandReductions,
-    DiffLaunchResult DiffLaunch,
-    string NextStep);
-
-public sealed record AICodingServicesSelfCheckResult(
-    string RepositoryRoot,
-    string RuntimeRoot,
-    string WatchedSolutionPath,
-    string WatchedProjectFolder,
-    string WorkingRoot,
-    string HistoryRoot,
-    string StagedRoot,
-    bool WatchedSolutionExists,
-    bool WatchedProjectFolderExists,
-    string? ResolvedDiffToolPath,
-    string SafetySummary,
-    string OverallStatus,
-    IReadOnlyList<AICodingServicesGuardrailCheck> Guardrails);
-
-public sealed record AICodingServicesGuardrailCheck(
-    string Name,
-    string Status,
-    string Message,
-    string? Path);
-
-public sealed record AICodingServicesRefreshIndexFileResult(
-    SolutionIndexSummary Summary,
-    MonitorStatusResult Status,
-    long ElapsedMilliseconds,
-    IndexedFileDetailResult Detail,
-    IReadOnlyList<IndexedDocumentRow> Files,
-    IReadOnlyList<IndexedSymbolRow> Symbols);
-
-public sealed record AICodingServicesRefreshIndexResult(
-    SolutionIndexSummary Summary,
-    MonitorStatusResult Status,
-    long ElapsedMilliseconds);
-
-public sealed record AICodingServicesRefreshFileAndIndexResult(
-    EditSessionStatus Refresh,
-    AICodingServicesRefreshIndexFileResult Index);
-
-public sealed record AICodingServicesSessionState(
-    string SessionId,
-    string Purpose,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc,
-    IReadOnlyList<AICodingServicesSessionEvent> Events)
-{
-    public IReadOnlyList<AICodingServicesSessionFileAccess> Files { get; init; } = [];
-
-    public AICodingServicesSessionEditPlan? EditPlan { get; init; }
-}
-
-public sealed record AICodingServicesSessionEditPlan(
-    DateTimeOffset DeclaredAtUtc,
-    IReadOnlyList<AICodingServicesSessionPlannedFile> FilesPlanned);
-
-public sealed record AICodingServicesSessionPlannedFile(
-    string SourceFilePath,
-    string RelativePath,
-    string OwningProjectPath,
-    string FileName,
-    string ProjectName,
-    string Role,
-    string Reason);
-
-public sealed record AICodingServicesSessionPlannedFileInput(
-    string SourceFilePath,
-    string? OwningProjectPath = null,
-    string? Role = null,
-    string? Reason = null);
-
-public sealed record PlannedSessionDecisionOptions(
-    bool DeferIndexRefresh,
-    PostAcceptIndexRefreshPlan? RefreshPlan,
-    IReadOnlyList<StagedEditRecord> TerminalValidationRecords);
-
-public sealed record AICodingServicesSessionSummary(
-    string SessionId,
-    string Purpose,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc,
-    int EventCount);
-
-public sealed record AICodingServicesSessionEvent(
-    DateTimeOffset TimestampUtc,
-    string EventType,
-    string Summary,
-    string? PayloadJson);
-
-public sealed record AICodingServicesSessionFileAccess(
-    string SessionId,
-    string SourceFilePath,
-    string RelativePath,
-    string AccessKind,
-    AICodingServicesFileHashInfo Hash,
-    int FetchCount,
-    DateTimeOffset FirstAccessedAtUtc,
-    DateTimeOffset LastAccessedAtUtc);
-
-public sealed record AICodingServicesFileHashInfo(
-    string Sha256,
-    long Length,
-    DateTime LastWriteTimeUtc);
-
-public sealed record AICodingServicesFileReadResult(
-    string SourceFilePath,
-    string RelativePath,
-    AICodingServicesFileHashInfo Hash,
-    AICodingServicesSessionFileAccess? SessionAccess,
-    string Content);
-
-public sealed record AICodingServicesFileHashCheckResult(
-    string SourceFilePath,
-    bool KnownInSession,
-    bool ChangedSinceFetch,
-    AICodingServicesFileHashInfo Current,
-    AICodingServicesFileHashInfo? Previous,
-    AICodingServicesSessionFileAccess? PreviousAccess);
-
-public sealed record AICodingServicesFileMatch(
-    string Name,
-    string Path,
-    string RelativePath);
-
-public sealed record AICodingServicesCompatibilityResult(
-    string Status,
-    string Message,
-    IReadOnlyDictionary<string, string?> Arguments);
-
-public sealed record AICodingServicesLedgerInfo(
-    string Path,
-    long Length,
-    DateTime LastWriteTimeUtc);
-
-public sealed record AICodingServicesLedgerReadResult(
-    string Path,
-    bool Exists,
-    string Content);
-
-public sealed record AICodingServicesWatchedProjectInfo(
-    string Name,
-    string Path,
-    IReadOnlyList<string> SolutionFiles);
-
-public sealed record AICodingServicesServerShutdownResult(
-    int ProcessId,
-    DateTimeOffset RequestedAtUtc,
-    string Reason);
-
-public sealed class AICodingServicesMcpRuntimeState
-{
-    private readonly IMonitorLogger logger;
-    private long lastActivityTicks = DateTimeOffset.UtcNow.UtcTicks;
-    private int shutdownRequested;
-
-    public AICodingServicesMcpRuntimeState(IMonitorLogger logger)
-    {
-        this.logger = logger;
-    }
-
-    public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref lastActivityTicks), TimeSpan.Zero);
-
-    public bool ShutdownRequested => Volatile.Read(ref shutdownRequested) == 1;
-
-    public void Touch([CallerMemberName] string toolName = "")
-    {
-        Interlocked.Exchange(ref lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
-        logger.Write(
-            MonitorLogLevel.Information,
-            "AICodingServices.McpServer",
-            "adapter.mcp.tool.called",
-            "MCP tool call observed.",
-            new Dictionary<string, string>
-            {
-                ["requestId"] = Guid.NewGuid().ToString("N"),
-                ["adapterProtocol"] = "mcp",
-                ["toolName"] = ToSnakeCase(toolName),
-                ["memberName"] = toolName,
-                ["isError"] = "false"
-            });
-    }
-
-    public void RequestShutdown(string? reason)
-    {
-        _ = reason;
-        Volatile.Write(ref shutdownRequested, 1);
-        Touch();
-    }
-
-    private static string ToSnakeCase(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return value;
-        }
-
-        StringBuilder builder = new(value.Length + 8);
-        for (int index = 0; index < value.Length; index++)
-        {
-            char character = value[index];
-            if (char.IsUpper(character) && index > 0)
-            {
-                builder.Append('_');
-            }
-
-            builder.Append(char.ToLowerInvariant(character));
-        }
-
-        return builder.ToString();
-    }
-}

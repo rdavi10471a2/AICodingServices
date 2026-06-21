@@ -48,6 +48,8 @@ public sealed class StagedReviewPageService
         WorkflowEditService workflowService = new(settings);
         StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
         WorkflowEditService.EnsureRecordNotDecided(record);
+        IReadOnlyList<StagedEditRecord> sessionRecords = GetSessionRecords(workflowService, record);
+        StagedReviewDecisionOptions decisionOptions = CreateDecisionOptions(record, sessionRecords, "accepted");
 
         if (!File.Exists(record.StagedFilePath))
         {
@@ -61,6 +63,7 @@ public sealed class StagedReviewPageService
         }
 
         File.Copy(record.StagedFilePath, record.WatchedFilePath, overwrite: true);
+        bool runBackgroundValidation = ShouldRunBackgroundValidation(decisionOptions, requestedDecision: "accepted");
         ReviewDecisionWithIndexRefreshResult result = CreateDecisionWorkflow().Record(
             settings,
             CreateLogger(),
@@ -68,20 +71,55 @@ public sealed class StagedReviewPageService
             record.StagedRecordId,
             "accepted",
             record.StagedHash,
-            nameof(CodexUI));
+            nameof(CodexUI),
+            deferIndexRefresh: true,
+            refreshPlan: decisionOptions.RefreshPlan,
+            terminalValidationRecords: []);
+        if (runBackgroundValidation)
+        {
+            StartBackgroundValidation(record.StagedRecordId, decisionOptions);
+        }
+
         StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
+        string nextStep = runBackgroundValidation
+            ? "Post-accept build and index refresh are running in the background. Refresh this page or Telemetry to see completion."
+            : result.NextStep;
         return new StagedReviewPageActionResult(
             CreateModel(decided),
-            $"Accepted proposed candidate into current source. {result.NextStep}");
+            $"Accepted proposed candidate into current source. {nextStep}");
     }
 
     public StagedReviewPageActionResult Reject(string stagedRecordId)
     {
         WorkflowEditService workflowService = new(settings);
-        StagedEditRecord decided = workflowService.RecordDecision(stagedRecordId, "rejected");
+        StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
+        WorkflowEditService.EnsureRecordNotDecided(record);
+        IReadOnlyList<StagedEditRecord> sessionRecords = GetSessionRecords(workflowService, record);
+        StagedReviewDecisionOptions decisionOptions = CreateDecisionOptions(record, sessionRecords, "rejected");
+        bool runBackgroundValidation = ShouldRunBackgroundValidation(decisionOptions, requestedDecision: "rejected");
+        ReviewDecisionWithIndexRefreshResult result = CreateDecisionWorkflow().Record(
+            settings,
+            CreateLogger(),
+            workflowService,
+            record.StagedRecordId,
+            "rejected",
+            expectedStagedHash: null,
+            nameof(CodexUI),
+            deferIndexRefresh: true,
+            refreshPlan: decisionOptions.RefreshPlan,
+            terminalValidationRecords: []);
+        if (runBackgroundValidation)
+        {
+            StartBackgroundValidation(record.StagedRecordId, decisionOptions);
+        }
+
+        StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
+        string nextStep = runBackgroundValidation
+            ? "Post-accept index refresh for accepted session files is running in the background. Refresh this page or Telemetry to see completion."
+            : result.NextStep;
         return new StagedReviewPageActionResult(
             CreateModel(decided),
-            "Rejected proposed candidate. Current source was left unchanged.");
+            $"Rejected proposed candidate. Current source was left unchanged. {nextStep}");
     }
 
     private StagedDecisionWorkflow CreateDecisionWorkflow()
@@ -93,6 +131,118 @@ public sealed class StagedReviewPageService
     {
         return new JsonLinesMonitorLogger(MonitorLogPaths.GetDefaultLogPath(settings));
     }
+
+    private static bool ShouldRunBackgroundValidation(
+    StagedReviewDecisionOptions decisionOptions,
+    string requestedDecision)
+    {
+        if (decisionOptions.DeferIndexRefresh)
+        {
+            return false;
+        }
+
+        if (requestedDecision.Equals("accepted", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return decisionOptions.RefreshPlan is not null
+            && decisionOptions.RefreshPlan.ChangedFilePaths.Count > 0;
+    }
+
+    private void StartBackgroundValidation(
+    string stagedRecordId,
+    StagedReviewDecisionOptions decisionOptions)
+    {
+        MonitorSettings capturedSettings = settings;
+        _ = Task.Run(() =>
+        {
+            IMonitorLogger logger = new JsonLinesMonitorLogger(MonitorLogPaths.GetDefaultLogPath(capturedSettings));
+            try
+            {
+                WorkflowEditService workflowService = new(capturedSettings);
+                new StagedDecisionWorkflow().CompletePostAcceptValidation(
+                    capturedSettings,
+                    logger,
+                    workflowService,
+                    stagedRecordId,
+                    "CodexUI.Background",
+                    decisionOptions.RefreshPlan,
+                    terminalValidationRecords: decisionOptions.TerminalValidationRecords);
+            }
+            catch (Exception ex)
+            {
+                logger.Write(
+                    MonitorLogLevel.Error,
+                    "CodexUI.Background",
+                    "postaccept.background.failed",
+                    "Background post-accept build/index validation failed.",
+                    new Dictionary<string, string>
+                    {
+                        ["stagedRecordId"] = stagedRecordId,
+                        ["error"] = ex.Message
+                    });
+            }
+        });
+    }
+
+    private static IReadOnlyList<StagedEditRecord> GetSessionRecords(
+    WorkflowEditService workflowService,
+    StagedEditRecord record)
+    {
+        if (string.IsNullOrWhiteSpace(record.SessionId))
+        {
+            return [];
+        }
+
+        return workflowService.ListStagedRecords(record.SessionId);
+    }
+
+    private static StagedReviewDecisionOptions CreateDecisionOptions(
+    StagedEditRecord currentRecord,
+    IReadOnlyList<StagedEditRecord> sessionRecords,
+    string requestedDecision)
+    {
+        if (string.IsNullOrWhiteSpace(currentRecord.SessionId) || sessionRecords.Count == 0)
+        {
+            return new StagedReviewDecisionOptions(false, null, []);
+        }
+
+        bool hasOtherPendingRecords = sessionRecords.Any(record =>
+            !record.StagedRecordId.Equals(currentRecord.StagedRecordId, StringComparison.Ordinal)
+            && IsPendingSessionRecord(record));
+        bool acceptingCurrentRecord = requestedDecision.Equals("accepted", StringComparison.OrdinalIgnoreCase);
+
+        StagedEditRecord[] acceptedRecords = sessionRecords
+            .Append(currentRecord)
+            .Where(record => record.Classification is "accepted" or "accepted-normalized"
+                || (acceptingCurrentRecord && record.StagedRecordId.Equals(currentRecord.StagedRecordId, StringComparison.Ordinal)))
+            .GroupBy(record => Path.GetFullPath(record.WatchedFilePath), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(record => record.CreatedAtUtc, StringComparer.Ordinal).First())
+            .OrderBy(record => record.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (acceptedRecords.Length == 0)
+        {
+            return new StagedReviewDecisionOptions(hasOtherPendingRecords, null, []);
+        }
+
+        PostAcceptIndexRefreshPlan refreshPlan = new()
+        {
+            ChangedFilePaths = acceptedRecords.Select(record => record.WatchedFilePath).ToArray(),
+            OwningProjectPaths = []
+        };
+
+        return new StagedReviewDecisionOptions(
+            hasOtherPendingRecords,
+            refreshPlan,
+            hasOtherPendingRecords ? [] : acceptedRecords);
+    }
+
+    private sealed record StagedReviewDecisionOptions(
+    bool DeferIndexRefresh,
+    PostAcceptIndexRefreshPlan? RefreshPlan,
+    IReadOnlyList<StagedEditRecord> TerminalValidationRecords);
 
     private static bool IsPendingSessionRecord(StagedEditRecord record)
     {

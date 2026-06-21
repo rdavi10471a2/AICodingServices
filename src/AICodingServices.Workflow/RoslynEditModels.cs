@@ -47,11 +47,21 @@ public sealed record RoslynSourceMapResult(
     long EstimatedTokenProxy = 0,
     int BudgetLimit = 0,
     bool WasTruncated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoslynSourceMapPage? Page = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoslynSourceMapPage? NextPage = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? UntruncatedEstimatedTokenProxy = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WatchedProjectAlias = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WatchedProjectFolder = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<RoslynSourceMapNarrowingSuggestion>? SuggestedNarrowing = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<RoslynSourceMapNextCall>? SuggestedNextCalls = null);
 
+public sealed record RoslynSourceMapPage(
+    string OrderBy,
+    int SkipSymbols,
+    int MaxSymbols,
+    int ReturnedSymbols,
+    int TotalSymbols,
+    bool HasMore);
 public sealed record RoslynSourceMapFile(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceFilePath,
     string RelativePath,

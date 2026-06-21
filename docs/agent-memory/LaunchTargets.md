@@ -68,4 +68,6 @@ Expected healthy result: site reachable at `http://localhost:5000/`, active tran
 - Watched solution: confirm through the live app or `get_monitor_status`; it may be this repo during self-edit dogfooding or an external watched target during normal work.
 - MCP hub owner: CodexUI
 - Bridge server name for clients: `aicodingservices`
+- Stable bridge fallback for Codex Desktop: `dotnet C:\VSCodeProjects\CodingServices\runtime\mcp-bridge\current\AICodingServices.McpStdioBridge.dll --repo-root C:\VSCodeProjects\CodingServices --config C:\VSCodeProjects\CodingServices\config\appsettings.json`.
+- `initialize_coding_services` refreshes `runtime\mcp-bridge\current` from `src\AICodingServices.McpStdioBridge\bin\Debug\net10.0` before probing the direct bridge fallback.
 - CodingServices MCP backend owns watched-source review, staging, and decision recording.

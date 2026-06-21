@@ -146,7 +146,71 @@ public sealed class StagedDecisionWorkflowTests
         Assert.True(result.PostAcceptBuild.Failed);
         Assert.Null(result.IndexRefresh);
         Assert.Contains("post-accept watched solution build failed", result.NextStep, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stop the watched app/process", result.NextStep, StringComparison.OrdinalIgnoreCase);
         Assert.True(workflowService.GetStatus(sourcePath).IndexStale);
+    }
+
+    [Fact]
+    public void Record_routes_post_accept_build_to_isolated_runtime_output()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "AICodingServicesIndexingTests", Guid.NewGuid().ToString("N"));
+        string repositoryRoot = Path.Combine(tempRoot, "Repo");
+        string runtimeRoot = Path.Combine(tempRoot, "Runtime");
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string projectPath = Path.Combine(watchedRoot, "Example.csproj");
+        string sourcePath = Path.Combine(watchedRoot, "Widget.razor.css");
+
+        Directory.CreateDirectory(watchedRoot);
+        File.WriteAllText(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <OutputType>Library</OutputType>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+            </Project>
+            """);
+        File.WriteAllText(sourcePath, ".title { color: red; }");
+
+        MonitorSettings settings = MonitorSettings.Create(repositoryRoot, projectPath, runtimeRoot);
+        WorkflowEditService workflowService = new(settings);
+        EditSessionStatus refresh = workflowService.Refresh(sourcePath);
+        File.WriteAllText(refresh.WorkingFilePath, ".title { color: blue; }");
+        StagedEditRecord record = workflowService.Stage(sourcePath);
+        workflowService.RecordPreMergeValidation(
+            record.StagedRecordId,
+            new PreMergeValidationResult { Status = "passed", IsError = false },
+            forceApproved: false);
+        workflowService.RecordDiffLaunch(record.StagedRecordId, launched: true, "test launch");
+        File.Copy(record.StagedFilePath, sourcePath, overwrite: true);
+
+        CapturingBuildRunner buildRunner = new();
+        ReviewDecisionWithIndexRefreshResult result = CreateWorkflow(buildRunner).Record(
+            settings,
+            NullMonitorLogger.Instance,
+            workflowService,
+            record.StagedRecordId,
+            "accepted",
+            record.StagedHash,
+            "AICodingServices.Indexing.Tests",
+            deferIndexRefresh: false,
+            refreshPlan: new PostAcceptIndexRefreshPlan
+            {
+                ChangedFilePaths = [sourcePath],
+                OwningProjectPaths = [projectPath]
+            });
+
+        Assert.Equal("accepted", result.Classification);
+        Assert.NotNull(buildRunner.LastRequest);
+        Assert.Contains(
+            buildRunner.LastRequest!.AdditionalArguments,
+            argument => argument.StartsWith("/p:OutDir=", StringComparison.OrdinalIgnoreCase)
+                && argument.Contains(
+                    Path.Combine(runtimeRoot, "post-accept-build-output", record.StagedRecordId),
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -611,6 +675,17 @@ public sealed class StagedDecisionWorkflowTests
         public BuildResult Run(BuildRequest request, TimeSpan timeout)
         {
             return CreateBuildResult(request, 1, new BuildProjectCounts(1, 0, 1, 0, 1));
+        }
+    }
+
+    private sealed class CapturingBuildRunner : IBuildRunner
+    {
+        public BuildRequest? LastRequest { get; private set; }
+
+        public BuildResult Run(BuildRequest request, TimeSpan timeout)
+        {
+            LastRequest = request;
+            return CreateBuildResult(request, 0, new BuildProjectCounts(1, 1, 0, 0, 0));
         }
     }
 

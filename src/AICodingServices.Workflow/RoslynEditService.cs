@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Formatting;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -32,20 +33,51 @@ public sealed class RoslynEditService
         paths = new WorkflowEditPaths(settings);
     }
 
-    public RoslynSourceMapResult GetSourceMap(string? path, string scope = "auto", string mode = "auto", string? namespaceName = null)
+    public RoslynSourceMapResult GetSourceMap(
+    string? path,
+    string scope = "auto",
+    string mode = "auto",
+    string? namespaceName = null,
+    string orderBy = "declaration",
+    int skipSymbols = 0,
+    int maxSymbols = 0)
     {
+        if (skipSymbols < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(skipSymbols), "skipSymbols must be greater than or equal to zero.");
+        }
+
+        if (maxSymbols < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxSymbols), "maxSymbols must be greater than or equal to zero.");
+        }
+
+        string effectiveOrderBy = NormalizeSourceMapOrderBy(orderBy);
         string effectiveScope = ResolveEffectiveScope(path, NormalizeScope(scope));
         string effectiveMode = ResolveEffectiveMode(effectiveScope, mode);
         string? requestedNamespace = effectiveScope.Equals("namespace", StringComparison.OrdinalIgnoreCase)
             ? namespaceName ?? path
             : namespaceName;
         string[] files = ResolveSourceMapFiles(path, effectiveScope, requestedNamespace).ToArray();
-        RoslynSourceMapFile[] mappedFiles = files.Select(MapFile).Select(file => ShapeSourceMapFile(file, effectiveMode)).ToArray();
+        RoslynSourceMapFile[] allMappedFiles = files.Select(MapFile).Select(file => ShapeSourceMapFile(file, effectiveMode)).ToArray();
+        int totalSymbolCount = allMappedFiles.Sum(file => file.Symbols.Count);
+        bool pagingRequested = skipSymbols > 0 || maxSymbols > 0;
+        RoslynSourceMapFile[] mappedFiles = pagingRequested
+            ? ApplySourceMapSymbolPage(allMappedFiles, effectiveOrderBy, skipSymbols, maxSymbols).ToArray()
+            : allMappedFiles;
+        int returnedSymbolCount = mappedFiles.Sum(file => file.Symbols.Count);
+        RoslynSourceMapPage? page = pagingRequested
+            ? new RoslynSourceMapPage(effectiveOrderBy, skipSymbols, maxSymbols, returnedSymbolCount, totalSymbolCount, skipSymbols + returnedSymbolCount < totalSymbolCount)
+            : null;
+        RoslynSourceMapPage? nextPage = page is not null && page.HasMore
+            ? new RoslynSourceMapPage(effectiveOrderBy, skipSymbols + returnedSymbolCount, maxSymbols, 0, totalSymbolCount, true)
+            : null;
         string watchedProjectAlias = new DirectoryInfo(paths.Settings.WatchedProjectFolder).Name;
         string? watchedProjectFolder = effectiveMode.Equals("full", StringComparison.OrdinalIgnoreCase)
             ? paths.Settings.WatchedProjectFolder
             : null;
         RoslynSourceMapNextCall[] nextCalls = BuildSourceMapNextCalls(mappedFiles, effectiveMode).ToArray();
+        nextCalls = PrependSourceMapNextPageCall(nextCalls, nextPage, path, effectiveScope, effectiveMode, requestedNamespace).ToArray();
         int budgetLimit = GetSourceMapBudgetLimit(effectiveMode);
         RoslynSourceMapResult result = new(
             effectiveScope,
@@ -54,9 +86,11 @@ public sealed class RoslynEditService
             path,
             requestedNamespace,
             mappedFiles.Length,
-            mappedFiles.Sum(file => file.Symbols.Count),
+            returnedSymbolCount,
             mappedFiles,
             BudgetLimit: budgetLimit,
+            Page: page,
+            NextPage: nextPage,
             WatchedProjectAlias: watchedProjectAlias,
             WatchedProjectFolder: watchedProjectFolder,
             SuggestedNextCalls: nextCalls.Length == 0 ? null : nextCalls);
@@ -66,16 +100,8 @@ public sealed class RoslynEditService
             return result with { EstimatedTokenProxy = estimatedTokenProxy };
         }
 
-        RoslynSourceMapNarrowingSuggestion[] suggestions = BuildSourceMapNarrowingSuggestions(mappedFiles).ToArray();
-        return result with
-        {
-            FileCount = 0,
-            SymbolCount = 0,
-            Files = [],
-            EstimatedTokenProxy = estimatedTokenProxy,
-            WasTruncated = true,
-            SuggestedNarrowing = suggestions
-        };
+        RoslynSourceMapNarrowingSuggestion[] suggestions = BuildSourceMapNarrowingSuggestions(allMappedFiles).ToArray();
+        return BuildBudgetedTruncatedSourceMapResult(result, mappedFiles, budgetLimit, suggestions, estimatedTokenProxy);
     }
 
     public RoslynFileOutlineResult GetFileOutline(string watchedFilePath)
@@ -125,8 +151,8 @@ public sealed class RoslynEditService
         CompilationUnitSyntax root = ParseCompilationUnit(status.WorkingFilePath, status.RelativePath);
         RoslynSymbolSelector selector = ParseSymbolSelector(symbolSelectorJson);
         MemberDeclarationSyntax target = ResolveSingleMember(root, selector, status.RelativePath);
-        MemberDeclarationSyntax replacement = ParseMemberDeclaration(code, "replacement symbol")
-            .WithLeadingTrivia(target.GetLeadingTrivia())
+        MemberDeclarationSyntax parsedReplacement = ParseMemberDeclaration(code, "replacement symbol");
+        MemberDeclarationSyntax replacement = PreserveReplacementMetadata(target, parsedReplacement)
             .WithTrailingTrivia(target.GetTrailingTrivia())
             .WithAdditionalAnnotations(FormatAnnotation);
         return WriteRoot("submit_symbol", status, root.ReplaceNode(target, replacement), manifestJson, validateOverlay);
@@ -553,6 +579,25 @@ public sealed class RoslynEditService
         return member;
     }
 
+    private static MemberDeclarationSyntax PreserveReplacementMetadata(MemberDeclarationSyntax target, MemberDeclarationSyntax replacement)
+    {
+        MemberDeclarationSyntax merged = replacement;
+        if (replacement.AttributeLists.Count == 0 && target.AttributeLists.Count > 0)
+        {
+            merged = replacement switch
+            {
+                BaseTypeDeclarationSyntax type => type.WithAttributeLists(target.AttributeLists),
+                BaseFieldDeclarationSyntax field => field.WithAttributeLists(target.AttributeLists),
+                BaseMethodDeclarationSyntax method => method.WithAttributeLists(target.AttributeLists),
+                BasePropertyDeclarationSyntax property => property.WithAttributeLists(target.AttributeLists),
+                DelegateDeclarationSyntax del => del.WithAttributeLists(target.AttributeLists),
+                _ => replacement
+            };
+        }
+
+        return merged.WithLeadingTrivia(target.GetLeadingTrivia());
+    }
+
     private static MemberDeclarationSyntax ResolveSingleMember(CompilationUnitSyntax root, RoslynSymbolSelector selector, string relativePath)
     {
         MemberDeclarationSyntax[] matches = root.DescendantNodes()
@@ -782,6 +827,240 @@ public sealed class RoslynEditService
     {
         string json = JsonSerializer.Serialize(result, SourceMapJsonOptions);
         return Math.Max(1, (json.Length + 3L) / 4L);
+    }
+
+    private static IEnumerable<RoslynSourceMapNextCall> PrependSourceMapNextPageCall(
+    IReadOnlyList<RoslynSourceMapNextCall> calls,
+    RoslynSourceMapPage? nextPage,
+    string? path,
+    string scope,
+    string mode,
+    string? namespaceName)
+    {
+        if (nextPage is null)
+        {
+            return calls;
+        }
+
+        Dictionary<string, string> arguments = new(StringComparer.Ordinal)
+        {
+            ["scope"] = scope,
+            ["mode"] = mode,
+            ["orderBy"] = nextPage.OrderBy,
+            ["skipSymbols"] = nextPage.SkipSymbols.ToString(CultureInfo.InvariantCulture),
+            ["maxSymbols"] = nextPage.MaxSymbols.ToString(CultureInfo.InvariantCulture)
+        };
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            arguments["path"] = path;
+        }
+
+        if (!string.IsNullOrWhiteSpace(namespaceName))
+        {
+            arguments["namespaceName"] = namespaceName;
+        }
+
+        RoslynSourceMapNextCall pageCall = new(1, "get_source_map", "read-next-ordered-source-map-page", arguments);
+        return new[] { pageCall }
+            .Concat(calls.Select(call => call with { Rank = call.Rank + 1 }));
+    }
+
+    private static int SourceMapChunkOrderRank(string kind)
+    {
+        return kind switch
+        {
+            "namespace" => 0,
+            "class" or "record" or "struct" or "interface" or "enum" or "delegate" => 1,
+            "constructor" => 2,
+            "method" => 3,
+            "property" or "event" => 4,
+            "field" => 5,
+            _ => 9
+        };
+    }
+
+    private static IEnumerable<(RoslynSourceMapFile File, int FileIndex, RoslynSourceMapSymbol Symbol, int SymbolIndex)> OrderSourceMapSymbolItems(
+    IReadOnlyList<RoslynSourceMapFile> files,
+    string orderBy)
+    {
+        IEnumerable<(RoslynSourceMapFile File, int FileIndex, RoslynSourceMapSymbol Symbol, int SymbolIndex)> items = files
+            .SelectMany((file, fileIndex) => file.Symbols.Select((symbol, symbolIndex) => (file, fileIndex, symbol, symbolIndex)));
+
+        return orderBy switch
+        {
+            "name" => items
+                .OrderBy(item => item.Symbol.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Symbol.StartLine),
+            "type-then-member" => items
+                .OrderBy(item => SourceMapChunkOrderRank(item.Symbol.Kind))
+                .ThenBy(item => item.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Symbol.StartLine),
+            "edit-priority" => items
+                .OrderBy(item => SourceMapSymbolNextCallRank(item.Symbol.Kind))
+                .ThenBy(item => item.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Symbol.StartLine),
+            "diagnostics" => items
+                .OrderByDescending(item => item.File.DiagnosticCount)
+                .ThenBy(item => item.File.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Symbol.StartLine),
+            _ => items
+                .OrderBy(item => item.FileIndex)
+                .ThenBy(item => item.Symbol.StartLine)
+                .ThenBy(item => item.Symbol.Name, StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    private static IEnumerable<RoslynSourceMapFile> ApplySourceMapSymbolPage(
+    IReadOnlyList<RoslynSourceMapFile> files,
+    string orderBy,
+    int skipSymbols,
+    int maxSymbols)
+    {
+        var selectedItems = OrderSourceMapSymbolItems(files, orderBy)
+            .Skip(skipSymbols);
+        if (maxSymbols > 0)
+        {
+            selectedItems = selectedItems.Take(maxSymbols);
+        }
+
+        return selectedItems
+            .GroupBy(item => item.FileIndex)
+            .OrderBy(group => group.Key)
+            .Select(group =>
+            {
+                RoslynSourceMapFile file = files[group.Key];
+                RoslynSourceMapSymbol[] symbols = group
+                    .OrderBy(item => item.SymbolIndex)
+                    .Select(item => item.Symbol)
+                    .ToArray();
+                return file with { Symbols = symbols };
+            })
+            .ToArray();
+    }
+
+    private static string NormalizeSourceMapOrderBy(string? orderBy)
+    {
+        if (string.IsNullOrWhiteSpace(orderBy))
+        {
+            return "declaration";
+        }
+
+        string normalized = orderBy.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "declaration" or "source" => "declaration",
+            "name" => "name",
+            "type-then-member" or "type" => "type-then-member",
+            "edit-priority" or "edit" => "edit-priority",
+            "diagnostics" or "diagnostic" => "diagnostics",
+            _ => throw new ArgumentException("Unsupported source-map orderBy value. Use declaration, name, type-then-member, edit-priority, or diagnostics.", nameof(orderBy))
+        };
+    }
+
+    private static RoslynSourceMapResult CreateTruncatedSourceMapResult(
+    RoslynSourceMapResult template,
+    IReadOnlyList<RoslynSourceMapFile> files,
+    int budgetLimit,
+    IReadOnlyList<RoslynSourceMapNarrowingSuggestion> suggestions,
+    long untruncatedEstimatedTokenProxy)
+    {
+        RoslynSourceMapNextCall[] nextCalls = BuildSourceMapNextCalls(files, template.Mode).ToArray();
+        return template with
+        {
+            FileCount = files.Count,
+            SymbolCount = files.Sum(file => file.Symbols.Count),
+            Files = files,
+            EstimatedTokenProxy = 0,
+            BudgetLimit = budgetLimit,
+            WasTruncated = true,
+            UntruncatedEstimatedTokenProxy = untruncatedEstimatedTokenProxy,
+            SuggestedNarrowing = suggestions,
+            SuggestedNextCalls = nextCalls.Length == 0 ? null : nextCalls
+        };
+    }
+
+    private static RoslynSourceMapFile? TrimSourceMapFileToBudget(
+    RoslynSourceMapResult template,
+    RoslynSourceMapFile file,
+    IReadOnlyList<RoslynSourceMapFile> includedFiles,
+    int budgetLimit,
+    IReadOnlyList<RoslynSourceMapNarrowingSuggestion> suggestions,
+    long untruncatedEstimatedTokenProxy)
+    {
+        int low = 0;
+        int high = file.Symbols.Count;
+        RoslynSourceMapFile? best = null;
+        while (low <= high)
+        {
+            int mid = low + ((high - low) / 2);
+            RoslynSourceMapFile candidateFile = file with { Symbols = file.Symbols.Take(mid).ToArray() };
+            RoslynSourceMapFile[] candidateFiles = includedFiles.Append(candidateFile).ToArray();
+            RoslynSourceMapResult candidate = CreateTruncatedSourceMapResult(
+                template,
+                candidateFiles,
+                budgetLimit,
+                suggestions,
+                untruncatedEstimatedTokenProxy);
+            if (EstimateSourceMapTokenProxy(candidate) <= budgetLimit)
+            {
+                best = candidateFile;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return best is not null && best.Symbols.Count > 0 ? best : null;
+    }
+
+    private static RoslynSourceMapResult BuildBudgetedTruncatedSourceMapResult(
+    RoslynSourceMapResult template,
+    IReadOnlyList<RoslynSourceMapFile> files,
+    int budgetLimit,
+    IReadOnlyList<RoslynSourceMapNarrowingSuggestion> suggestions,
+    long untruncatedEstimatedTokenProxy)
+    {
+        List<RoslynSourceMapFile> includedFiles = [];
+        foreach (RoslynSourceMapFile file in files)
+        {
+            RoslynSourceMapFile[] candidateFiles = includedFiles.Append(file).ToArray();
+            RoslynSourceMapResult candidate = CreateTruncatedSourceMapResult(
+                template,
+                candidateFiles,
+                budgetLimit,
+                suggestions,
+                untruncatedEstimatedTokenProxy);
+            if (EstimateSourceMapTokenProxy(candidate) <= budgetLimit)
+            {
+                includedFiles.Add(file);
+                continue;
+            }
+
+            RoslynSourceMapFile? trimmedFile = TrimSourceMapFileToBudget(
+                template,
+                file,
+                includedFiles,
+                budgetLimit,
+                suggestions,
+                untruncatedEstimatedTokenProxy);
+            if (trimmedFile is not null)
+            {
+                includedFiles.Add(trimmedFile);
+            }
+
+            break;
+        }
+
+        RoslynSourceMapResult result = CreateTruncatedSourceMapResult(
+            template,
+            includedFiles,
+            budgetLimit,
+            suggestions,
+            untruncatedEstimatedTokenProxy);
+        return result with { EstimatedTokenProxy = EstimateSourceMapTokenProxy(result) };
     }
 
     private static IEnumerable<RoslynSourceMapNarrowingSuggestion> BuildSourceMapNarrowingSuggestions(IReadOnlyList<RoslynSourceMapFile> files)

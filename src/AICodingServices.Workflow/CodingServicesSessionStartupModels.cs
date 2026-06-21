@@ -42,12 +42,15 @@ public sealed record CodingServicesStartupPaths(
     string SettingsPath,
     string CodexUiExePath,
     string CodexUiDllPath,
-    string DirectBridgeDllPath,
+        string DirectBridgeProjectPath,
+    string DirectBridgeBuildOutputDirectory,
+    string DirectBridgeCurrentDirectory,
+    string DirectBridgeCurrentDllPath,
     string ServerName,
     string SiteUrl)
 {
     public string DirectBridgeCommand =>
-        $"dotnet {DirectBridgeDllPath} --repo-root {RepositoryRoot} --config {SettingsPath}";
+        $"dotnet {DirectBridgeCurrentDllPath} --repo-root {RepositoryRoot} --config {SettingsPath}";
 
     public static CodingServicesStartupPaths Create(string repositoryRoot, string? settingsPath, string siteUrl)
     {
@@ -55,14 +58,35 @@ public sealed record CodingServicesStartupPaths(
         string resolvedSettingsPath = Path.GetFullPath(
             settingsPath ?? Path.Combine(resolvedRepositoryRoot, "config", "appsettings.json"));
 
+                string bridgeProjectPath = Path.Combine(
+            resolvedRepositoryRoot,
+            "src",
+            "AICodingServices.McpStdioBridge",
+            "AICodingServices.McpStdioBridge.csproj");
+        string bridgeBuildOutputDirectory = Path.Combine(
+            resolvedRepositoryRoot,
+            "src",
+            "AICodingServices.McpStdioBridge",
+            "bin",
+            "Debug",
+            "net10.0");
+        string bridgeCurrentDirectory = Path.Combine(
+            resolvedRepositoryRoot,
+            "runtime",
+            "mcp-bridge",
+            "current");
+
         return new CodingServicesStartupPaths(
             resolvedRepositoryRoot,
             resolvedSettingsPath,
             Path.Combine(resolvedRepositoryRoot, "src", "CodexUI", "bin", "Debug", "net10.0", "CodexUI.exe"),
             Path.Combine(resolvedRepositoryRoot, "src", "CodexUI", "bin", "Debug", "net10.0", "CodexUI.dll"),
-            Path.Combine(resolvedRepositoryRoot, "src", "AICodingServices.McpStdioBridge", "bin", "Debug", "net10.0", "AICodingServices.McpStdioBridge.dll"),
+            bridgeProjectPath,
+            bridgeBuildOutputDirectory,
+            bridgeCurrentDirectory,
+            Path.Combine(bridgeCurrentDirectory, "AICodingServices.McpStdioBridge.dll"),
             "aicodingservices",
-            siteUrl);
+            siteUrl);;
     }
 }
 
