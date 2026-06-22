@@ -63,3 +63,45 @@ Expected healthy result: site reachable at `http://localhost:5000/`, active tran
 
 - Keep only the current operational handoff here.
 - Move superseded restart notes out instead of stacking them in this file.
+
+## Session: SK Instructive Governance Planning (2026-06-21)
+
+### Branch
+`codex/semantic-kernel-workflow-orchestrator`
+
+### Latest Pushed Commit
+`0f93666` - "Update SK integration README to point at instructive governance proposal"
+
+### What Was Done
+1. Code review of SK vs Skill Cards architecture
+2. Identified prescriptive vs instructive governance gap
+3. Created `docs/sk-integration/InstructiveGovernanceProposal.md` (544 lines)
+4. Updated `docs/sk-integration/README.md` to point at proposal
+5. Both commits pushed successfully
+
+### Key Insight
+Current policy enforcement blocks wrong tool selection but doesn't explain WHY. The proposal is to make it instructive:
+- `ToolSelectionGuidance` model with `Reason`, `RecommendedAlternative`, `Hints`
+- Severity levels: Critical (block), Warning (explain), Info (suggest)
+- Keep blocking for safety-critical, add reasoning for guidance
+
+### Next Work Item (First Code Slice)
+**Implement deterministic MCP tool-choice guidance:**
+1. Add `ToolSelectionGuidance` model to `SessionIntentPolicyModels.cs`
+2. Add tests to `SessionIntentPolicyServiceTests.cs`
+3. Wire guidance into `SessionIntentPolicyService.Evaluate()`
+4. Expose guidance through MCP mutation failures/results
+
+### What NOT to Start With
+- Broad Program.cs surgery
+- Full SK planner work
+- Complete rewrite
+
+### Safe Restart Commands
+```bash
+cd /workspace/project/AICodingServices
+git checkout codex/semantic-kernel-workflow-orchestrator
+git pull origin codex/semantic-kernel-workflow-orchestrator
+# Read: docs/sk-integration/InstructiveGovernanceProposal.md
+# Read: docs/sk-integration/README.md
+```
