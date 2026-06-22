@@ -12,6 +12,7 @@ The active safety mechanism is CodingServices-owned Working files, pre-merge val
 - Use the Solution Index MCP surface for cheap project context before body reads: `query_solution_index`, `find_indexed_symbols`, `get_indexed_symbol`, `find_indexed_references`, `find_indexed_callers`, and `find_indexed_relationships`.
 - If the target file is already known, call `query_solution_index(scope: "file", value: "<relative path>")` first and use the returned symbol row's `StableSymbolKey`. Do not manually compose stable keys.
 - Before changing, removing, renaming, moving, or changing the signature/visibility of a C# symbol, perform a blast-radius check with references, callers, relationships, and one cross-check signal. Put every discovered affected watched file in the session plan before composing candidates.
+- Before any mutation tool, call `get_tool_selection_guidance(sessionId, sourceFilePath, "<intended_tool>")`. If guidance returns `Allowed: false` or `Severity: Critical`, stop before mutation and follow `RecommendedAlternative` plus `Hints`.
 - Use the smallest safe edit unit: symbol edit before whole-file replacement.
 - Diff stability depends on complete local edit context. Use source-map/symbol views for semantic C# edits, the full Working file for text/whole-file edits, or bounded exact replacements constrained by the smallest safe edit rule, before staging.
 - For any file at or above 32KB in a cold session, call `refresh_file` and chunk-read the returned Working file path. Do not use `get_file` for that cold-session entry.
@@ -66,6 +67,7 @@ find_indexed_references / find_indexed_callers before changing, removing, renami
 find_indexed_relationships when partials, inheritance, overrides, or interface implementations may affect the edit
 get_source_map(scope: "file", mode: "selector")
 get_symbol for the smallest needed body
+get_tool_selection_guidance(sessionId, path, "<intended_tool>"); Critical means stop and follow the recommended alternative
 submit_symbol / set_type_partial / add_field / add_property / add_method / add_constructor / add_nested_type
 add_symbol / remove_symbol / add_using / remove_using, when the narrow typed tools do not fit
 stage_candidate_for_review

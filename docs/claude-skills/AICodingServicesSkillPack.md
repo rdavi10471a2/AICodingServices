@@ -11,6 +11,7 @@ Planned-session discipline is part of that rule:
 - `start_monitor_session` first
 - explicit `owningProjectPath` for files the index cannot uniquely own
 - the same `sessionId` on every MCP mutation and staging call
+- before any mutation tool, call `get_tool_selection_guidance(sessionId, path, "<intended_tool>")`; `Critical` or `Allowed: false` means stop and follow the recommended alternative
 
 ## Load Order
 
@@ -58,6 +59,7 @@ These cards live in CodingServices so the workflow stays familiar while the repo
 CodingServices solution-index/source-map discovery
 start_monitor_session with the planned watched file set for coupled work
 refresh_file/new_file into CodingServices-owned Working candidates
+call get_tool_selection_guidance before mutation and obey Critical as a hard block
 use get_source_map/get_symbol/submit_symbol or typed edit tools
 stage all coupled candidates with the same sessionId
 review pre-merge validation
