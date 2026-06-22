@@ -70,14 +70,16 @@ Expected healthy result: site reachable at `http://localhost:5000/`, active tran
 `codex/semantic-kernel-workflow-orchestrator`
 
 ### Latest Pushed Commit
-`0f93666` - "Update SK integration README to point at instructive governance proposal"
+`6998840` - "Add watched-project workflow guidance tests"
 
 ### What Was Done
 1. Code review of SK vs Skill Cards architecture
 2. Identified prescriptive vs instructive governance gap
 3. Created `docs/sk-integration/InstructiveGovernanceProposal.md` (544 lines)
 4. Updated `docs/sk-integration/README.md` to point at proposal
-5. Both commits pushed successfully
+5. Codex implemented first code slice: ToolSelectionGuidance model, Evaluate() enhancements, get_tool_selection_guidance MCP tool, tests
+6. Added Blazor test fixtures (BlazorServer + WASM projects)
+7. Added comprehensive guidance tests (~35 tests covering all edit families, severities, scenarios)
 
 ### Key Insight
 Current policy enforcement blocks wrong tool selection but doesn't explain WHY. The proposal is to make it instructive:
@@ -85,12 +87,16 @@ Current policy enforcement blocks wrong tool selection but doesn't explain WHY. 
 - Severity levels: Critical (block), Warning (explain), Info (suggest)
 - Keep blocking for safety-critical, add reasoning for guidance
 
-### Next Work Item (First Code Slice)
-**Implement deterministic MCP tool-choice guidance:**
-1. Add `ToolSelectionGuidance` model to `SessionIntentPolicyModels.cs`
-2. Add tests to `SessionIntentPolicyServiceTests.cs`
-3. Wire guidance into `SessionIntentPolicyService.Evaluate()`
-4. Expose guidance through MCP mutation failures/results
+### Next Work Item
+**In progress: Blazor workflow guidance tests**
+- ✅ Blazor test fixtures created (BlazorServer + WASM)
+- ✅ Comprehensive guidance tests (~35 tests)
+- 🔄 Codex reviewing and enhancing test coverage
+
+**Remaining:**
+- Run tests locally to verify
+- Add MCP integration tests (mock MCP server calls)
+- Test `get_tool_selection_guidance` MCP tool directly
 
 ### What NOT to Start With
 - Broad Program.cs surgery
