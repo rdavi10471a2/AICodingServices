@@ -70,11 +70,34 @@ Key implementation decisions made by Codex:
 
 ## Remaining Work
 
-- **SK planner integration**: Next phase - SK consumes guidance surface end-to-end
-- **Skill card updates**: Reference `get_tool_selection_guidance` in workflow guidance
-- **Telemetry**: Record guidance compliance in session events for review
+The deterministic policy foundation is **complete and integrated**.
 
-The deterministic policy foundation is complete and tested.
+### Integrated Components
+
+| Component | Status |
+|-----------|--------|
+| `ToolSelectionGuidance` model | ✅ |
+| `SessionIntentPolicyService.Evaluate()` | ✅ |
+| `get_tool_selection_guidance` MCP tool | ✅ |
+| **Skill card guidance gate** | ✅ Documented in `AICodingServicesSkillPack.md` and `SystemMonitorStaging.md` |
+| Tests (~40 passing) | ✅ |
+
+### Skill Card Integration (96d9f4c)
+
+The guidance gate is now documented in the core skill cards:
+
+**AICodingServicesSkillPack.md:**
+> "before any mutation tool, call `get_tool_selection_guidance(sessionId, path, "<intended_tool>")`; `Critical` or `Allowed: false` means stop and follow the recommended alternative"
+
+**SystemMonitorStaging.md:**
+> "call `get_tool_selection_guidance(sessionId, sourceFilePath, "<intended_tool>")`. If guidance returns `Allowed: false` or `Severity: Critical`, stop before mutation and follow `RecommendedAlternative` plus `Hints`."
+
+### Next Steps
+
+- **Observe**: Does Codex follow the guidance gate in practice?
+- **Measure**: Token usage comparison (before/after guidance enforcement)
+- **Iterate**: Adjust guidance rules based on real-world Codex behavior
+- **SK reasoning (future)**: Enhance with Semantic Kernel reasoning when foundation is proven in production
 
 ## Problem
 
