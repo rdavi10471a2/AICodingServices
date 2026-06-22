@@ -9,7 +9,7 @@ The active safety mechanism is CodingServices-owned Working files, pre-merge val
 - Do not edit watched source directly.
 - All watched-source changes go through CodingServices staging.
 - Reason in the cloud; compose locally. Use source-map selectors and CodingServices edit tools to describe the intended edit, then let local tooling splice/stage the candidate.
-- Use the Solution Index MCP surface for cheap project context before body reads: `get_solution_index_tree`, `query_solution_index`, `find_indexed_symbols`, `get_indexed_symbol`, `find_indexed_references`, `find_indexed_callers`, and `find_indexed_relationships`.
+- Use the Solution Index MCP surface for cheap project context before body reads: `query_solution_index`, `find_indexed_symbols`, `get_indexed_symbol`, `find_indexed_references`, `find_indexed_callers`, and `find_indexed_relationships`.
 - If the target file is already known, call `query_solution_index(scope: "file", value: "<relative path>")` first and use the returned symbol row's `StableSymbolKey`. Do not manually compose stable keys.
 - Before changing, removing, renaming, moving, or changing the signature/visibility of a C# symbol, perform a blast-radius check with references, callers, relationships, and one cross-check signal. Put every discovered affected watched file in the session plan before composing candidates.
 - Use the smallest safe edit unit: symbol edit before whole-file replacement.
@@ -59,7 +59,7 @@ get_workflow_status
 get_tool_manifest when discovering the current tool contract
 get_staging_guide when the client needs the staging and session rules
 find_file, unless the full path was returned by a Roslyn or Monitor tool in this session
-get_solution_index_tree for project orientation, or query_solution_index for folder/namespace/file slices
+query_solution_index for solution, folder, namespace, or file slices
 query_solution_index(scope: "file", value: path) when the file is already known; use returned StableSymbolKey
 find_indexed_symbols / get_indexed_symbol for target declarations
 find_indexed_references / find_indexed_callers before changing, removing, renaming, moving, or changing signature/visibility of symbols
@@ -108,6 +108,6 @@ For whole-file staging, use Roslyn shape plus `get_file`; skip `get_source_map` 
 
 For files at or above 32KB of any type, the cold-session read path is `refresh_file(sourceFilePath)` followed by bounded chunk reads from the returned Working file path. This prevents oversized MCP results. If the file is already loaded in the current session, skip the read and use the in-context text as the guard for `replace_text_in_file`.
 
-If a candidate target came from `get_solution_index`, `get_solution_index_tree`, `query_solution_index`, `find_indexed_symbols`, `get_indexed_symbol`, `find_indexed_references`, `find_indexed_callers`, `find_indexed_relationships`, or cached compact index JSON, treat that target as discovery only. Refresh the file selector/hash in the current session before body read and mutation; if the live selector is missing, ambiguous, or hash-drifted, refresh/rebuild the selector data and restart the narrow edit path.
+If a candidate target came from `get_solution_index`, `query_solution_index`, `find_indexed_symbols`, `get_indexed_symbol`, `find_indexed_references`, `find_indexed_callers`, `find_indexed_relationships`, or cached compact index JSON, treat that target as discovery only. Refresh the file selector/hash in the current session before body read and mutation; if the live selector is missing, ambiguous, or hash-drifted, refresh/rebuild the selector data and restart the narrow edit path.
 
 Debug-only reference: `get_smoke_test_catalog` is for maintainers investigating or extending smoke coverage, not for normal Claude review or edit planning.

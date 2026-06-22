@@ -63,17 +63,6 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Refresh a watched source file into the monitor-owned Working folder, then refresh the same file in the monitor-owned SQLite solution index.")]
-    public async Task<AICodingServicesRefreshFileAndIndexResult> RefreshFileAndIndex(
-        [Description("Watched source file path, absolute or relative to the watched solution folder.")] string sourceFilePath)
-    {
-        runtimeState.Touch();
-        EditSessionStatus refresh = workflowService.Refresh(ResolveWatchedPath(sourceFilePath));
-        AICodingServicesRefreshIndexFileResult index = await RefreshSolutionIndexFileCore(sourceFilePath);
-        return new AICodingServicesRefreshFileAndIndexResult(refresh, index);
-    }
-
-    [McpServerTool]
     [Description("Return status for the monitor-owned watched solution index, including database path and indexed counts.")]
     public MonitorStatusResult GetSolutionIndexStatus()
     {
@@ -89,25 +78,6 @@ public sealed partial class AICodingServicesTools
     {
         runtimeState.Touch();
         return queryService.QueryIndex(maxFiles: maxFiles, maxSymbols: maxSymbols);
-    }
-
-    [McpServerTool]
-    [Description("Return the monitor-owned watched solution index tree as compact JSON: projects, namespaces, and files.")]
-    public AICodingServicesSolutionIndexTree GetSolutionIndexTree()
-    {
-        runtimeState.Touch();
-        IReadOnlyList<IndexedProjectRow> projects = queryService.ListProjects();
-        IReadOnlyList<IndexedDocumentRow> documents = queryService.ListDocuments();
-        IReadOnlyList<AICodingServicesNamespaceTree> namespaces = queryService.ListSymbols()
-            .GroupBy(symbol => symbol.Namespace)
-            .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => new AICodingServicesNamespaceTree(
-                group.Key,
-                group.Select(symbol => symbol.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-                group.Count()))
-            .ToArray();
-
-        return new AICodingServicesSolutionIndexTree(projects, documents, namespaces);
     }
 
     [McpServerTool]

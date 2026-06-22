@@ -72,16 +72,6 @@ public sealed record AICodingServicesIndexedReferenceResult(
     string CallerName,
     string CallerKind);
 
-public sealed record AICodingServicesSolutionIndexTree(
-    IReadOnlyList<IndexedProjectRow> Projects,
-    IReadOnlyList<IndexedDocumentRow> Files,
-    IReadOnlyList<AICodingServicesNamespaceTree> Namespaces);
-
-public sealed record AICodingServicesNamespaceTree(
-    string Namespace,
-    IReadOnlyList<string> Files,
-    int SymbolCount);
-
 public sealed record AICodingServicesStageCandidateResult(
     string StagedRecordId,
     string StagedHash,
@@ -133,10 +123,6 @@ public sealed record AICodingServicesRefreshIndexResult(
     SolutionIndexSummary Summary,
     MonitorStatusResult Status,
     long ElapsedMilliseconds);
-
-public sealed record AICodingServicesRefreshFileAndIndexResult(
-    EditSessionStatus Refresh,
-    AICodingServicesRefreshIndexFileResult Index);
 
 public sealed record AICodingServicesSessionState(
     string SessionId,
