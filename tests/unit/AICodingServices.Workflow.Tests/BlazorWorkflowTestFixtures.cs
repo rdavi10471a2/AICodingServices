@@ -21,7 +21,8 @@ public sealed class BlazorWorkflowTestFixtures
         string runtimeRoot = Path.Combine(tempRoot, "Runtime");
         string projectRoot = Path.Combine(repositoryRoot, "src", "BlazorApp");
         string projectPath = Path.Combine(projectRoot, "BlazorApp.csproj");
-        string programPath = Path.Combine(projectRoot, Program.Path);
+        string programPath = Path.Combine(projectRoot, "Program.cs");
+        string appPath = Path.Combine(projectRoot, "App.razor");
         string importsPath = Path.Combine(projectRoot, "_Imports.razor");
         string counterPath = Path.Combine(projectRoot, "Counter.razor");
         string counterCodePath = Path.Combine(projectRoot, "Counter.razor.cs");
@@ -59,11 +60,30 @@ public sealed class BlazorWorkflowTestFixtures
         File.WriteAllText(
             programPath,
             """
-            var builder = WebApplication.CreateBuilder(args);
-            builder.Services.AddRazorComponents();
-            var app = builder.Build();
-            app.MapRazorComponents<App>();
-            app.Run();
+            namespace BlazorApp;
+
+            public static class Program
+            {
+                public static void Main(string[] args)
+                {
+                    WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+                    builder.Services.AddRazorComponents();
+                    WebApplication app = builder.Build();
+                    app.MapRazorComponents<App>();
+                    app.Run();
+                }
+            }
+            """);
+
+        // App.razor
+        File.WriteAllText(
+            appPath,
+            """
+            <Router AppAssembly="@typeof(App).Assembly">
+                <Found Context="routeData">
+                    <RouteView RouteData="routeData" />
+                </Found>
+            </Router>
             """);
 
         // _Imports.razor
@@ -109,6 +129,8 @@ public sealed class BlazorWorkflowTestFixtures
         File.WriteAllText(
             counterCodePath,
             """
+            using Microsoft.AspNetCore.Components;
+
             namespace BlazorApp.Components;
 
             public partial class Counter : ComponentBase
@@ -199,6 +221,7 @@ public sealed class BlazorWorkflowTestFixtures
             projectRoot,
             projectPath,
             programPath,
+            appPath,
             importsPath,
             counterPath,
             counterCodePath,
@@ -270,11 +293,11 @@ public sealed class BlazorWorkflowTestFixtures
         File.WriteAllText(
             layoutPath,
             """
-            @inherits LayoutComponentBase
+            @inherits Microsoft.AspNetCore.Components.LayoutComponentBase
 
             <div class="main-layout">
                 <nav class="sidebar">
-                    <NavMenu />
+                    <a href="">Home</a>
                 </nav>
                 <main class="content">
                     @Body
@@ -320,6 +343,7 @@ public sealed record BlazorProjectFixture(
     string ProjectRoot,
     string ProjectPath,
     string ProgramPath,
+    string AppPath,
     string ImportsPath,
     string CounterPath,
     string CounterCodePath,

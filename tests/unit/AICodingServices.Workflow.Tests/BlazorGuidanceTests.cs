@@ -1,4 +1,9 @@
+using AICodingServices.Core;
+using AICodingServices.Data;
+using AICodingServices.Logging;
+using AICodingServices.McpServer;
 using AICodingServices.Workflow;
+using Microsoft.Extensions.Hosting;
 
 namespace AICodingServices.Workflow.Tests;
 
@@ -91,7 +96,7 @@ public sealed class BlazorGuidanceTests
     }
 
     [Fact]
-    public void Guidance_for_razor_markup_allows_span_as_fallback()
+    public void Guidance_for_razor_markup_allows_span_as_recommended_bounded_edit()
     {
         BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
         try
@@ -104,9 +109,9 @@ public sealed class BlazorGuidanceTests
 
             Assert.True(decision.Allowed);
             Assert.NotNull(decision.Guidance);
-            Assert.False(decision.Guidance.IsRecommended);
-            Assert.Equal(ToolSelectionSeverity.Warning, decision.Guidance.Severity);
-            Assert.Contains("fallback", decision.Guidance.Reason, StringComparison.OrdinalIgnoreCase);
+            Assert.True(decision.Guidance.IsRecommended);
+            Assert.Equal(ToolSelectionSeverity.Info, decision.Guidance.Severity);
+            Assert.Contains("matches", decision.Guidance.Reason, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -228,7 +233,7 @@ public sealed class BlazorGuidanceTests
             Assert.NotNull(decision.Guidance);
             Assert.True(decision.Guidance.IsRecommended);
             Assert.Equal(ToolSelectionSeverity.Info, decision.Guidance.Severity);
-            Assert.Contains("submit_symbol", decision.Guidance.Reason, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("RoslynSymbol", decision.Guidance.Reason, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -345,7 +350,8 @@ public sealed class BlazorGuidanceTests
             SessionDerivedEditPolicy policy = service.DerivePolicy(intent);
             Assert.True(policy.RequiresReferenceDiscovery);
 
-            SessionEditPolicyDecision decision = service.Evaluate(policy, SessionEditOperationFamily.RoslynSymbol, null);
+            SessionEditPolicyDecision decision = service.Evaluate(policy, SessionEditOperationFamily.TextReplace, null);
+            Assert.False(decision.Allowed);
             Assert.NotNull(decision.Guidance);
             Assert.Contains(decision.Guidance.Hints, h => h.Contains("reference", StringComparison.OrdinalIgnoreCase));
         }
@@ -367,7 +373,8 @@ public sealed class BlazorGuidanceTests
             SessionDerivedEditPolicy policy = service.DerivePolicy(intent);
             Assert.True(policy.RequiresReferenceDiscovery);
 
-            SessionEditPolicyDecision decision = service.Evaluate(policy, SessionEditOperationFamily.RoslynSymbol, null);
+            SessionEditPolicyDecision decision = service.Evaluate(policy, SessionEditOperationFamily.TextReplace, null);
+            Assert.False(decision.Allowed);
             Assert.NotNull(decision.Guidance);
             Assert.Contains(decision.Guidance.Hints, h => h.Contains("discovery", StringComparison.OrdinalIgnoreCase));
         }
@@ -627,7 +634,7 @@ public sealed class BlazorGuidanceTests
             SessionEditPolicyDecision recommendedDecision = service.Evaluate(policy, SessionEditOperationFamily.RoslynSymbol, null);
             Assert.True(recommendedDecision.Allowed);
             Assert.True(recommendedDecision.Guidance?.IsRecommended);
-            Assert.Contains("submit_symbol", recommendedDecision.Guidance?.RecommendedAlternative ?? "");
+            Assert.Contains("submit_symbol", recommendedDecision.Guidance?.PolicyBasis ?? "", StringComparison.OrdinalIgnoreCase);
 
             // Blocked: Text replace
             SessionEditPolicyDecision blockedDecision = service.Evaluate(policy, SessionEditOperationFamily.TextReplace, null);
@@ -774,14 +781,17 @@ public sealed class BlazorGuidanceTests
             // Shared API: Reference discovery required
             Assert.True(policy.RequiresReferenceDiscovery);
 
-            // Roslyn symbol is still recommended
-            SessionEditPolicyDecision decision = service.Evaluate(policy, SessionEditOperationFamily.RoslynSymbol, null);
-            Assert.True(decision.Allowed);
-            Assert.True(decision.Guidance?.IsRecommended);
+            // Roslyn symbol is still recommended for the actual edit.
+            SessionEditPolicyDecision recommendedDecision = service.Evaluate(policy, SessionEditOperationFamily.RoslynSymbol, null);
+            Assert.True(recommendedDecision.Allowed);
+            Assert.True(recommendedDecision.Guidance?.IsRecommended);
 
-            // But guidance includes discovery hints
+            // Blocked alternatives include discovery hints before mutating shared surfaces.
+            SessionEditPolicyDecision blockedDecision = service.Evaluate(policy, SessionEditOperationFamily.TextReplace, null);
+            Assert.False(blockedDecision.Allowed);
+            Assert.NotNull(blockedDecision.Guidance);
             Assert.Contains(
-                decision.Guidance?.Hints,
+                blockedDecision.Guidance.Hints,
                 h => h.Contains("reference", StringComparison.OrdinalIgnoreCase)
                   || h.Contains("caller", StringComparison.OrdinalIgnoreCase));
         }
@@ -922,7 +932,203 @@ public sealed class BlazorGuidanceTests
 
     #endregion
 
+    #region Watched Project MCP Adapter Coverage
+
+    [Fact]
+    public void Mcp_tools_edit_and_stage_blazor_markup_as_watched_project()
+    {
+        BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
+        try
+        {
+            AICodingServicesTools tools = CreateMcpTools(fixture.Settings);
+            AICodingServicesSessionState session = tools.StartMonitorSession(
+                [new AICodingServicesSessionPlannedFileInput(
+                    SourceFilePath: fixture.CounterPath,
+                    OwningProjectPath: fixture.ProjectPath,
+                    Reason: "Treat the Blazor fixture as the watched project and edit markup through MCP tools.",
+                    TargetKind: "RazorMarkup",
+                    ChangeKind: "ModifyExistingBehavior",
+                    ExpectedShape: "MarkupChange",
+                    Risk: "LocalOnly",
+                    DiscoveryAlreadyDone: true)],
+                "blazor watched project markup edit");
+
+            ToolSelectionGuidance guidance = tools.GetToolSelectionGuidance(
+                session.SessionId,
+                fixture.CounterPath,
+                "replace_text_in_file");
+            Assert.True(guidance.Allowed);
+            Assert.True(guidance.IsRecommended);
+
+            tools.RefreshFile(fixture.CounterPath, session.SessionId);
+            ReplaceTextResult replacement = tools.ReplaceTextInFile(
+                fixture.CounterPath,
+                "<PageTitle>Counter</PageTitle>",
+                "<PageTitle>Double Counter</PageTitle>",
+                session.SessionId,
+                expectedMatches: 1);
+            AICodingServicesStageCandidateResult staged = tools.StageCandidateForReview(
+                fixture.CounterPath,
+                session.SessionId,
+                ledgerSummary: "MCP watched-project Blazor markup edit.");
+            StagedEditRecord record = tools.GetStagedRecord(staged.StagedRecordId);
+
+            Assert.Equal("staged", staged.Status);
+            Assert.Equal(1, replacement.ReplacementCount);
+            Assert.EndsWith("Counter.razor", record.RelativePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Double Counter", File.ReadAllText(record.StagedFilePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanupFixture(fixture);
+        }
+    }
+
+    [Fact]
+    public void Mcp_tools_block_csharp_text_replace_as_watched_project_with_guidance()
+    {
+        BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
+        try
+        {
+            AICodingServicesTools tools = CreateMcpTools(fixture.Settings);
+            AICodingServicesSessionState session = tools.StartMonitorSession(
+                [new AICodingServicesSessionPlannedFileInput(
+                    SourceFilePath: fixture.CounterCodePath,
+                    OwningProjectPath: fixture.ProjectPath,
+                    Reason: "Treat the Blazor fixture as the watched project and reject unsafe C# text replacement.",
+                    TargetKind: "CSharpSource",
+                    ChangeKind: "ModifyExistingBehavior",
+                    ExpectedShape: "MethodBodyChange",
+                    TargetSymbols: ["IncrementCount"],
+                    Risk: "LocalOnly",
+                    DiscoveryAlreadyDone: true)],
+                "blazor watched project csharp guidance");
+
+            ToolSelectionGuidance guidance = tools.GetToolSelectionGuidance(
+                session.SessionId,
+                fixture.CounterCodePath,
+                "replace_text_in_file");
+            Assert.False(guidance.Allowed);
+            Assert.Equal(ToolSelectionSeverity.Critical, guidance.Severity);
+            Assert.Contains("submit_symbol", guidance.RecommendedAlternative ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            tools.RefreshFile(fixture.CounterCodePath, session.SessionId);
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                tools.ReplaceTextInFile(
+                    fixture.CounterCodePath,
+                    "currentCount++;",
+                    "currentCount += 2;",
+                    session.SessionId,
+                    expectedMatches: 1));
+
+            Assert.Contains("Tool selection guidance", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("severity=Critical", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("submit_symbol", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            CleanupFixture(fixture);
+        }
+    }
+
+    #endregion
+
+    #region Real Workflow Service Coverage
+
+    [Fact]
+    public void Workflow_service_edits_and_stages_razor_markup_fixture()
+    {
+        BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
+        try
+        {
+            WorkflowEditService service = new(fixture.Settings);
+            service.Refresh(fixture.CounterPath);
+
+            service.ReplaceText(
+                fixture.CounterPath,
+                "<PageTitle>Counter</PageTitle>",
+                "<PageTitle>Double Counter</PageTitle>",
+                expectedMatches: 1);
+            StagedEditRecord record = service.Stage(fixture.CounterPath, sessionId: "blazor-markup-test");
+
+            Assert.Equal("staged", record.Status);
+            Assert.EndsWith("Counter.razor", record.RelativePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Double Counter", File.ReadAllText(record.StagedFilePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanupFixture(fixture);
+        }
+    }
+
+    [Fact]
+    public void Workflow_service_edits_and_stages_scoped_css_fixture()
+    {
+        BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
+        try
+        {
+            WorkflowEditService service = new(fixture.Settings);
+            service.Refresh(fixture.CounterCssPath);
+
+            service.ReplaceText(
+                fixture.CounterCssPath,
+                "color: var(--primary-color);",
+                "color: #c1121f;",
+                expectedMatches: 1);
+            StagedEditRecord record = service.Stage(fixture.CounterCssPath, sessionId: "blazor-css-test");
+
+            Assert.Equal("staged", record.Status);
+            Assert.EndsWith("Counter.razor.css", record.RelativePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("#c1121f", File.ReadAllText(record.StagedFilePath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CleanupFixture(fixture);
+        }
+    }
+
+    [Fact]
+    public void Workflow_service_rejects_csharp_text_replace_for_codebehind_fixture()
+    {
+        BlazorProjectFixture fixture = BlazorWorkflowTestFixtures.CreateBlazorServerFixture();
+        try
+        {
+            WorkflowEditService service = new(fixture.Settings);
+            service.Refresh(fixture.CounterCodePath);
+
+            InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+                service.ReplaceText(
+                    fixture.CounterCodePath,
+                    "currentCount++;",
+                    "currentCount += 2;",
+                    expectedMatches: 1));
+
+            Assert.Contains("replace_text_in_file is not allowed for C#", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            CleanupFixture(fixture);
+        }
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    private static AICodingServicesTools CreateMcpTools(MonitorSettings settings)
+    {
+        IMonitorLogger logger = new NullMonitorLogger();
+        return new AICodingServicesTools(
+            settings,
+            SolutionIndexQueryService.Create(settings),
+            new WorkflowEditService(settings),
+            new RoslynEditService(settings),
+            new DemoWorkspaceService(settings),
+            new WorkflowEditPaths(settings),
+            new AICodingServicesMcpRuntimeState(logger),
+            new TestHostApplicationLifetime(),
+            logger);
+    }
 
     private static SessionPlannedFileIntent CreateMarkupIntent(string expectedShape, string risk)
     {
@@ -976,6 +1182,44 @@ public sealed class BlazorGuidanceTests
         if (root != null && Directory.Exists(root))
         {
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed class NullMonitorLogger : IMonitorLogger
+    {
+        public void Write(
+            MonitorLogLevel level,
+            string source,
+            string eventName,
+            string message,
+            IReadOnlyDictionary<string, string>? properties = null)
+        {
+        }
+    }
+
+    private sealed class TestHostApplicationLifetime : IHostApplicationLifetime
+    {
+        private readonly CancellationTokenSource started = new();
+        private readonly CancellationTokenSource stopping = new();
+        private readonly CancellationTokenSource stopped = new();
+
+        public CancellationToken ApplicationStarted => started.Token;
+
+        public CancellationToken ApplicationStopping => stopping.Token;
+
+        public CancellationToken ApplicationStopped => stopped.Token;
+
+        public void StopApplication()
+        {
+            if (!stopping.IsCancellationRequested)
+            {
+                stopping.Cancel();
+            }
+
+            if (!stopped.IsCancellationRequested)
+            {
+                stopped.Cancel();
+            }
         }
     }
 

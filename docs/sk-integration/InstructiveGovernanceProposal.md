@@ -1,6 +1,6 @@
 # Instructive Governance Proposal
 
-Status: first implementation pass complete on branch `codex/semantic-kernel-workflow-orchestrator`; planner-facing workflow test cases are the next work area.
+Status: first implementation pass complete on branch `codex/semantic-kernel-workflow-orchestrator`; first watched-project workflow test pass is complete, with broader SK planner scenarios still next.
 Source review input: OpenHands commit 11c6be5afcde7e4c9f4b89745282d3c36bd5fec2.
 
 ## Decision
@@ -30,8 +30,10 @@ The first implementation pass is complete on this branch:
 - `get_tool_selection_guidance` exposes deterministic, read-only pre-mutation guidance for planned files.
 - `SessionIntentPolicyService.ParseOperationFamily` accepts both edit-family names and common MCP tool names, such as `TextReplace`, `replace_text_in_file`, and `submit_symbol`.
 - Focused unit coverage proves critical blocked guidance, fallback-reason guidance, allowed fallback warning guidance, recommended positive guidance, and operation-family parsing.
+- The Blazor workflow fixture now behaves like a watched project: tests start MCP sessions, request deterministic tool guidance, refresh Working candidates, edit/stage Razor markup, and prove C# text replacement is blocked with actionable guidance.
+- The fixture now includes compile-valid Blazor Server/WASM project shape so workflow tests exercise realistic project files instead of isolated text snippets.
 
-The remaining work is to generate real workflow test cases that exercise planner-style behavior against this guidance surface without making Semantic Kernel the enforcement authority.
+The remaining work is to generate broader SK planner scenarios that consume this guidance surface end to end without making Semantic Kernel the enforcement authority.
 
 ## Problem
 
