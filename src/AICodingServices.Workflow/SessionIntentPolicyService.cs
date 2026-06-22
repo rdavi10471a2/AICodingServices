@@ -54,6 +54,44 @@ public sealed class SessionIntentPolicyService
             "Unknown target kinds default to span edits, with text or whole-file edits requiring an explicit fallback reason.");
     }
 
+    public SessionEditOperationFamily ParseOperationFamily(string operationFamily)
+    {
+        if (string.IsNullOrWhiteSpace(operationFamily))
+        {
+            throw new InvalidOperationException("Operation family is required. Use a SessionEditOperationFamily value or a known MCP edit tool name.");
+        }
+
+        string normalized = operationFamily.Trim();
+        if (Enum.TryParse(normalized, ignoreCase: true, out SessionEditOperationFamily parsed))
+        {
+            return parsed;
+        }
+
+        string toolName = normalized.Replace('-', '_').ToLowerInvariant();
+        return toolName switch
+        {
+            "submit_symbol" => SessionEditOperationFamily.RoslynSymbol,
+            "add_symbol" => SessionEditOperationFamily.RoslynSymbol,
+            "remove_symbol" => SessionEditOperationFamily.RoslynSymbol,
+            "add_using" => SessionEditOperationFamily.RoslynSymbol,
+            "remove_using" => SessionEditOperationFamily.RoslynSymbol,
+            "set_type_partial" => SessionEditOperationFamily.RoslynSymbol,
+            "add_field" => SessionEditOperationFamily.RoslynSymbol,
+            "add_property" => SessionEditOperationFamily.RoslynSymbol,
+            "add_method" => SessionEditOperationFamily.RoslynSymbol,
+            "add_constructor" => SessionEditOperationFamily.RoslynSymbol,
+            "add_nested_type" => SessionEditOperationFamily.RoslynSymbol,
+            "replace_span_in_file" => SessionEditOperationFamily.Span,
+            "replace_text_in_file" => SessionEditOperationFamily.TextReplace,
+            "submit_file" => SessionEditOperationFamily.WholeFile,
+            "stage_candidate_for_review" => SessionEditOperationFamily.Stage,
+            "refresh_file" => SessionEditOperationFamily.Refresh,
+            "new_file" => SessionEditOperationFamily.Refresh,
+            "get_file" => SessionEditOperationFamily.Read,
+            _ => throw new InvalidOperationException($"Unsupported operation family or MCP tool name: {operationFamily}.")
+        };
+    }
+
     public SessionEditPolicyDecision Evaluate(
     SessionDerivedEditPolicy policy,
     SessionEditOperationFamily requestedFamily,
@@ -63,17 +101,53 @@ public sealed class SessionIntentPolicyService
             || requestedFamily == SessionEditOperationFamily.Refresh
             || requestedFamily == SessionEditOperationFamily.Read)
         {
-            return new SessionEditPolicyDecision(true, false, "Workflow operation is allowed for a planned file.");
+            ToolSelectionGuidance guidance = new(
+                true,
+                true,
+                ToolSelectionSeverity.Info,
+                "Workflow operation is allowed for a planned file.",
+                null,
+                FormatPolicyMessage(policy),
+                []);
+
+            return new SessionEditPolicyDecision(guidance.Allowed, false, guidance.Reason)
+            {
+                Guidance = guidance
+            };
         }
 
         if (policy.BlockedEditFamilies.Contains(requestedFamily))
         {
-            return new SessionEditPolicyDecision(false, false, $"{requestedFamily} is blocked by the derived session edit policy. {FormatPolicyMessage(policy)}");
+            ToolSelectionGuidance guidance = new(
+                false,
+                false,
+                ToolSelectionSeverity.Critical,
+                $"{requestedFamily} is blocked by the derived session edit policy.",
+                GetRecommendedAlternative(policy),
+                FormatPolicyMessage(policy),
+                BuildGuidanceHints(policy, requestedFamily, false));
+
+            return new SessionEditPolicyDecision(guidance.Allowed, false, FormatGuidanceMessage(guidance))
+            {
+                Guidance = guidance
+            };
         }
 
         if (policy.PreferredEditFamilies.Contains(requestedFamily))
         {
-            return new SessionEditPolicyDecision(true, false, $"{requestedFamily} matches the derived session edit policy. {FormatPolicyMessage(policy)}");
+            ToolSelectionGuidance guidance = new(
+                true,
+                true,
+                ToolSelectionSeverity.Info,
+                $"{requestedFamily} matches the derived session edit policy.",
+                null,
+                FormatPolicyMessage(policy),
+                BuildGuidanceHints(policy, requestedFamily, true));
+
+            return new SessionEditPolicyDecision(guidance.Allowed, false, FormatGuidanceMessage(guidance))
+            {
+                Guidance = guidance
+            };
         }
 
         if (policy.FallbackEditFamilies.Contains(requestedFamily))
@@ -81,13 +155,117 @@ public sealed class SessionIntentPolicyService
             bool hasReason = !string.IsNullOrWhiteSpace(fallbackReason);
             if (policy.FallbackRequiresReason && !hasReason)
             {
-                return new SessionEditPolicyDecision(false, true, $"{requestedFamily} requires a fallback reason for this session intent. {FormatPolicyMessage(policy)}");
+                ToolSelectionGuidance guidance = new(
+                    false,
+                    false,
+                    ToolSelectionSeverity.Warning,
+                    $"{requestedFamily} requires a fallback reason for this session intent.",
+                    GetRecommendedAlternative(policy),
+                    FormatPolicyMessage(policy),
+                    BuildGuidanceHints(policy, requestedFamily, false));
+
+                return new SessionEditPolicyDecision(guidance.Allowed, true, FormatGuidanceMessage(guidance))
+                {
+                    Guidance = guidance
+                };
             }
 
-            return new SessionEditPolicyDecision(true, policy.FallbackRequiresReason, $"{requestedFamily} is allowed as a documented fallback. {FormatPolicyMessage(policy)}");
+            ToolSelectionGuidance allowedFallbackGuidance = new(
+                true,
+                false,
+                ToolSelectionSeverity.Warning,
+                $"{requestedFamily} is allowed as a documented fallback.",
+                GetRecommendedAlternative(policy),
+                FormatPolicyMessage(policy),
+                BuildGuidanceHints(policy, requestedFamily, true));
+
+            return new SessionEditPolicyDecision(allowedFallbackGuidance.Allowed, policy.FallbackRequiresReason, FormatGuidanceMessage(allowedFallbackGuidance))
+            {
+                Guidance = allowedFallbackGuidance
+            };
         }
 
-        return new SessionEditPolicyDecision(false, false, $"{requestedFamily} is not allowed by the derived session edit policy. {FormatPolicyMessage(policy)}");
+        ToolSelectionGuidance defaultGuidance = new(
+            false,
+            false,
+            ToolSelectionSeverity.Critical,
+            $"{requestedFamily} is not allowed by the derived session edit policy.",
+            GetRecommendedAlternative(policy),
+            FormatPolicyMessage(policy),
+            BuildGuidanceHints(policy, requestedFamily, false));
+
+        return new SessionEditPolicyDecision(defaultGuidance.Allowed, false, FormatGuidanceMessage(defaultGuidance))
+        {
+            Guidance = defaultGuidance
+        };
+    }
+
+    private static string FormatGuidanceMessage(ToolSelectionGuidance guidance)
+    {
+        string message = $"{guidance.Reason} {guidance.PolicyBasis}";
+        if (!string.IsNullOrWhiteSpace(guidance.RecommendedAlternative))
+        {
+            message += $" Recommended alternative: {guidance.RecommendedAlternative}.";
+        }
+
+        if (guidance.Hints.Count > 0)
+        {
+            message += $" Hints: {string.Join("; ", guidance.Hints)}.";
+        }
+
+        return message;
+    }
+
+    private static string? GetRecommendedAlternative(SessionDerivedEditPolicy policy)
+    {
+        SessionEditOperationFamily? preferredFamily = policy.PreferredEditFamilies.FirstOrDefault();
+        if (preferredFamily is null || preferredFamily == SessionEditOperationFamily.Unknown)
+        {
+            return null;
+        }
+
+        return preferredFamily switch
+        {
+            SessionEditOperationFamily.RoslynSymbol => "submit_symbol or another Roslyn typed edit tool after get_source_map",
+            SessionEditOperationFamily.Span => "replace_span_in_file with source-map-backed bounds",
+            SessionEditOperationFamily.TextReplace => "replace_text_in_file with expectedMatches",
+            SessionEditOperationFamily.WholeFile => "submit_file",
+            SessionEditOperationFamily.Stage => "stage_candidate_for_review",
+            SessionEditOperationFamily.Refresh => "refresh_file",
+            SessionEditOperationFamily.Read => "get_file",
+            _ => preferredFamily.Value.ToString()
+        };
+    }
+
+    private static IReadOnlyList<string> BuildGuidanceHints(
+    SessionDerivedEditPolicy policy,
+    SessionEditOperationFamily requestedFamily,
+    bool isAllowed)
+    {
+        List<string> hints = [];
+
+        if (!isAllowed && policy.FallbackEditFamilies.Contains(requestedFamily) && policy.FallbackRequiresReason)
+        {
+            hints.Add("provide fallbackReason in manifestJson when using a fallback edit family");
+        }
+
+        if (policy.PreferredEditFamilies.Contains(SessionEditOperationFamily.RoslynSymbol))
+        {
+            hints.Add("run get_source_map in selector mode before Roslyn symbol edits");
+        }
+
+        if (policy.PreferredEditFamilies.Contains(SessionEditOperationFamily.Span)
+            || policy.FallbackEditFamilies.Contains(SessionEditOperationFamily.Span))
+        {
+            hints.Add("use source-map or find_text_span evidence before replace_span_in_file");
+        }
+
+        if (!isAllowed && policy.RequiresReferenceDiscovery)
+        {
+            hints.Add("run indexed reference/caller/relationship discovery before mutating shared surface");
+        }
+
+        return hints;
     }
 
     private static SessionDerivedEditPolicy DeriveCSharpPolicy(

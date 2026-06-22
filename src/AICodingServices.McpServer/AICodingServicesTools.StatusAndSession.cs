@@ -123,6 +123,50 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
+    [Description("Return deterministic tool-selection guidance for a planned file before choosing a mutation tool. This is read-only guidance; MCP mutation tools still enforce policy.")]
+    public ToolSelectionGuidance GetToolSelectionGuidance(
+    [Description("Session handle returned by start_monitor_session.")] string sessionId,
+    [Description("Source file path, absolute or relative to the watched solution folder.")] string sourceFilePath,
+    [Description("Requested SessionEditOperationFamily value or MCP tool name, such as RoslynSymbol, submit_symbol, TextReplace, or replace_text_in_file.")] string operationFamily,
+    [Description("Optional fallback reason used when asking about a fallback edit family.")] string? fallbackReason = null,
+    [Description("Optional manifest JSON; fallbackReason is read from manifestJson when fallbackReason is omitted.")] string? manifestJson = null)
+    {
+        runtimeState.Touch();
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw new InvalidOperationException("Session edit scope is required before requesting tool-selection guidance. Call start_monitor_session with filesPlanned first.");
+        }
+
+        AICodingServicesSessionEditPlan editPlan = RequireSessionEditPlan(sessionId);
+        string fullPath = ResolveWatchedPath(sourceFilePath);
+        AICodingServicesSessionPlannedFile plannedFile = EnsurePlannedFile(editPlan, fullPath);
+        SessionDerivedEditPolicy policy = plannedFile.DerivedPolicy
+            ?? throw new InvalidOperationException("The planned file does not have a derived edit policy.");
+
+        SessionEditOperationFamily requestedFamily = sessionIntentPolicyService.ParseOperationFamily(operationFamily);
+        string? effectiveFallbackReason = string.IsNullOrWhiteSpace(fallbackReason)
+            ? ExtractFallbackReason(manifestJson)
+            : fallbackReason;
+        SessionEditPolicyDecision decision = sessionIntentPolicyService.Evaluate(policy, requestedFamily, effectiveFallbackReason);
+        ToolSelectionGuidance guidance = decision.Guidance
+            ?? new ToolSelectionGuidance(
+                decision.Allowed,
+                decision.Allowed,
+                decision.Allowed ? ToolSelectionSeverity.Info : ToolSelectionSeverity.Critical,
+                decision.Message,
+                null,
+                policy.Summary,
+                []);
+
+        RecordMonitorSessionEvent(
+            sessionId,
+            "tool-selection-guidance",
+            $"{requestedFamily} guidance for {plannedFile.RelativePath}: {guidance.Severity}",
+            JsonSerializer.Serialize(guidance, JsonOptions));
+        return guidance;
+    }
+
+    [McpServerTool]
     [Description("List durable monitor session handles known to this MCP server.")]
     public IReadOnlyList<AICodingServicesSessionSummary> ListMonitorSessions()
     {

@@ -1250,10 +1250,10 @@ public sealed partial class AICodingServicesTools
     }
 
     private void EnsurePlannedMutationAllowed(
-        string? sessionId,
-        string sourceFilePath,
-        SessionEditOperationFamily operationFamily,
-        string? manifestJson = null)
+    string? sessionId,
+    string sourceFilePath,
+    SessionEditOperationFamily operationFamily,
+    string? manifestJson = null)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
         {
@@ -1271,8 +1271,47 @@ public sealed partial class AICodingServicesTools
         SessionEditPolicyDecision decision = sessionIntentPolicyService.Evaluate(policy, operationFamily, ExtractFallbackReason(manifestJson));
         if (!decision.Allowed)
         {
-            throw new InvalidOperationException(decision.Message);
+            throw new InvalidOperationException(FormatPolicyGuidanceFailure(decision));
         }
+    }
+
+    private static string FormatPolicyGuidanceFailure(SessionEditPolicyDecision decision)
+    {
+        ToolSelectionGuidance? guidance = decision.Guidance;
+        if (guidance is null)
+        {
+            return decision.Message;
+        }
+
+        StringBuilder builder = new();
+        builder.Append("Tool selection guidance: ");
+        builder.Append("severity=");
+        builder.Append(guidance.Severity);
+        builder.Append("; allowed=");
+        builder.Append(guidance.Allowed);
+        builder.Append("; recommended=");
+        builder.Append(guidance.IsRecommended);
+        builder.Append(". ");
+        builder.Append(guidance.Reason);
+
+        if (!string.IsNullOrWhiteSpace(guidance.RecommendedAlternative))
+        {
+            builder.Append(" Recommended alternative: ");
+            builder.Append(guidance.RecommendedAlternative);
+            builder.Append('.');
+        }
+
+        builder.Append(' ');
+        builder.Append(guidance.PolicyBasis);
+
+        if (guidance.Hints.Count > 0)
+        {
+            builder.Append(" Hints: ");
+            builder.Append(string.Join("; ", guidance.Hints));
+            builder.Append('.');
+        }
+
+        return builder.ToString();
     }
 
     private void EnsurePlannedMutationAllowed(string? sessionId, string sourceFilePath)

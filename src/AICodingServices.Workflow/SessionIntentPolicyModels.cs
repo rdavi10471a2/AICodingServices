@@ -69,7 +69,27 @@ public sealed record SessionDerivedEditPolicy(
     bool RequiresOverlayValidation,
     string Summary);
 
+public enum ToolSelectionSeverity
+{
+    Info,
+    Warning,
+    Critical
+}
+
+public sealed record ToolSelectionGuidance(
+    bool Allowed,
+    bool IsRecommended,
+    ToolSelectionSeverity Severity,
+    string Reason,
+    string? RecommendedAlternative,
+    string PolicyBasis,
+    IReadOnlyList<string> Hints);
+
 public sealed record SessionEditPolicyDecision(
     bool Allowed,
     bool RequiresFallbackReason,
-    string Message);
+    string Message)
+{
+    public ToolSelectionGuidance? Guidance { get; init; }
+}
+;

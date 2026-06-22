@@ -1,6 +1,6 @@
 # Instructive Governance Proposal
 
-Status: path forward, not yet complete implementation.
+Status: first implementation pass complete on branch `codex/semantic-kernel-workflow-orchestrator`; planner-facing workflow test cases are the next work area.
 Source review input: OpenHands commit 11c6be5afcde7e4c9f4b89745282d3c36bd5fec2.
 
 ## Decision
@@ -19,6 +19,19 @@ CodingServices now has deterministic session policy in `SessionIntentPolicyServi
 - Planned review validates the staged set before merge.
 
 Semantic Kernel is present, but not yet end-to-end governance. Today it is most visible in startup/orchestration, while MCP methods still enforce policy directly.
+
+## Implemented First Pass
+
+The first implementation pass is complete on this branch:
+
+- `ToolSelectionGuidance` and `ToolSelectionSeverity` now model allowed/recommended/severity/reason/alternative/basis/hints.
+- `SessionIntentPolicyService.Evaluate` now returns instructive guidance while preserving the compact `SessionEditPolicyDecision` compatibility shape.
+- MCP mutation policy failures now include guidance fields in thrown messages.
+- `get_tool_selection_guidance` exposes deterministic, read-only pre-mutation guidance for planned files.
+- `SessionIntentPolicyService.ParseOperationFamily` accepts both edit-family names and common MCP tool names, such as `TextReplace`, `replace_text_in_file`, and `submit_symbol`.
+- Focused unit coverage proves critical blocked guidance, fallback-reason guidance, allowed fallback warning guidance, recommended positive guidance, and operation-family parsing.
+
+The remaining work is to generate real workflow test cases that exercise planner-style behavior against this guidance surface without making Semantic Kernel the enforcement authority.
 
 ## Problem
 
