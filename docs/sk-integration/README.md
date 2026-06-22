@@ -1,9 +1,12 @@
 # Semantic Kernel Integration
 
-Start here:
+**Current Path Forward:** [InstructiveGovernanceProposal.md](./InstructiveGovernanceProposal.md)
 
-1. `SemanticKernelPolicyGovernorRoadmap.md`
-2. `InstructiveGovernanceProposal.md`
-3. `SemanticKernelImplementationGuide.md`
+The instructive governance proposal is the path forward for turning deterministic MCP policy into agent-visible guidance without making SK the sole enforcement authority.
 
-The roadmap is the current implementation priority. The instructive governance proposal is the path forward for turning deterministic MCP policy into agent-visible guidance without making SK the sole enforcement authority. The implementation guide is example-oriented architecture vocabulary for plugins, planners, and memory.
+## Navigation
+
+1. **Start here:** `InstructiveGovernanceProposal.md` - current implementation priority
+2. `SemanticKernelPolicyGovernorRoadmap.md` - original vision and roadmap context
+3. `SemanticKernelImplementationGuide.md` - example-oriented architecture vocabulary for plugins, planners, and memory
+4. `GovernedCommandProof.md` - governed command output reducer proof-of-concept
