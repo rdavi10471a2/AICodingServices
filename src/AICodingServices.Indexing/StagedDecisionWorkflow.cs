@@ -1,11 +1,24 @@
 using AICodingServices.Core;
 using AICodingServices.Logging;
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Indexing;
 
 public sealed class StagedDecisionWorkflow
 {
+    private readonly IBuildRunner buildRunner;
+
+    public StagedDecisionWorkflow()
+        : this(new DotNetBuildRunner())
+    {
+    }
+
+    public StagedDecisionWorkflow(IBuildRunner buildRunner)
+    {
+        this.buildRunner = buildRunner;
+    }
+
     public ReviewDecisionWithIndexRefreshResult Record(
         MonitorSettings settings,
         IMonitorLogger logger,
@@ -29,17 +42,27 @@ public sealed class StagedDecisionWorkflow
             terminalValidationRecords);
 
         StagedEditRecord record = workflowService.RecordDecision(stagedRecordId, decision, expectedStagedHash);
+        BuildResult? postAcceptBuild = null;
         PostAcceptIndexRefreshResult? indexRefresh = null;
         if (record.Classification is "accepted" or "accepted-normalized")
         {
-            indexRefresh = deferIndexRefresh
-                ? PostAcceptIndexRefreshService.DeferredUntilPlannedFilesComplete()
-                : new PostAcceptIndexRefreshService().RebuildAfterAcceptedDecision(
-                    settings,
-                    logger,
-                    record,
-                    source,
-                    refreshPlan);
+            if (deferIndexRefresh)
+            {
+                indexRefresh = PostAcceptIndexRefreshService.DeferredUntilPlannedFilesComplete();
+            }
+            else
+            {
+                postAcceptBuild = RunPostAcceptBuild(settings, logger, record, source);
+                if (!postAcceptBuild.Failed)
+                {
+                    indexRefresh = new PostAcceptIndexRefreshService().RebuildAfterAcceptedDecision(
+                        settings,
+                        logger,
+                        record,
+                        source,
+                        refreshPlan);
+                }
+            }
         }
         else if (!deferIndexRefresh && refreshPlan is not null && refreshPlan.ChangedFilePaths.Count > 0)
         {
@@ -65,9 +88,127 @@ public sealed class StagedDecisionWorkflow
             StagedRecordPath = summary.RecordPath,
             StagedRecord = verbose ? record : null,
             IndexRefresh = indexRefresh,
+            PostAcceptBuild = postAcceptBuild,
             TerminalPreMergeValidation = terminalValidation,
-            NextStep = CreateNextStep(record, indexRefresh)
+            NextStep = CreateNextStep(record, indexRefresh, postAcceptBuild)
         };
+    }
+
+    public ReviewDecisionWithIndexRefreshResult CompletePostAcceptValidation(
+    MonitorSettings settings,
+    IMonitorLogger logger,
+    WorkflowEditService workflowService,
+    string stagedRecordId,
+    string source,
+    PostAcceptIndexRefreshPlan? refreshPlan = null,
+    bool verbose = false,
+    IReadOnlyList<StagedEditRecord>? terminalValidationRecords = null)
+    {
+        StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
+        PreMergeValidationResult? terminalValidation = ValidateTerminalPlannedOverlay(
+            settings,
+            record,
+            refreshPlan,
+            deferIndexRefresh: false,
+            terminalValidationRecords);
+
+        BuildResult? postAcceptBuild = null;
+        PostAcceptIndexRefreshResult? indexRefresh = null;
+        if (record.Classification is "accepted" or "accepted-normalized")
+        {
+            postAcceptBuild = RunPostAcceptBuild(settings, logger, record, source);
+            if (!postAcceptBuild.Failed)
+            {
+                indexRefresh = new PostAcceptIndexRefreshService().RebuildAfterAcceptedDecision(
+                    settings,
+                    logger,
+                    record,
+                    source,
+                    refreshPlan);
+            }
+        }
+        else if (refreshPlan is not null && refreshPlan.ChangedFilePaths.Count > 0)
+        {
+            indexRefresh = new PostAcceptIndexRefreshService().RebuildAfterAcceptedDecision(
+                settings,
+                logger,
+                record,
+                source,
+                refreshPlan);
+        }
+
+        StagedEditSummary summary = workflowService.CreateSummary(record);
+        return new ReviewDecisionWithIndexRefreshResult
+        {
+            StagedRecordId = record.StagedRecordId,
+            WatchedFilePath = record.WatchedFilePath,
+            RelativePath = record.RelativePath,
+            Decision = record.Decision,
+            Classification = record.Classification,
+            Status = record.Status,
+            Message = record.Message,
+            StagedRecordSummary = summary,
+            StagedRecordPath = summary.RecordPath,
+            StagedRecord = verbose ? record : null,
+            IndexRefresh = indexRefresh,
+            PostAcceptBuild = postAcceptBuild,
+            TerminalPreMergeValidation = terminalValidation,
+            NextStep = CreateNextStep(record, indexRefresh, postAcceptBuild)
+        };
+    }
+
+    private BuildResult RunPostAcceptBuild(
+        MonitorSettings settings,
+        IMonitorLogger logger,
+        StagedEditRecord record,
+        string source)
+    {
+        string artifactRoot = Path.Combine(settings.RuntimeRoot, "tool-logs", "post-accept-build");
+        string isolatedOutputRoot = Path.Combine(
+            settings.RuntimeRoot,
+            "post-accept-build-output",
+            record.StagedRecordId);
+        string isolatedOutputArgument = "/p:OutDir=" + EnsureTrailingDirectorySeparator(isolatedOutputRoot);
+        BuildResult result = buildRunner.Run(
+            new BuildRequest(
+                settings.WatchedSolutionPath,
+                BuildValidationPhase.Final,
+                settings.WatchedProjectFolder,
+                artifactRoot,
+                [
+                    "/p:UseAppHost=false",
+                    "/p:NuGetAudit=false",
+                    isolatedOutputArgument
+                ]),
+            TimeSpan.FromMinutes(5));
+        logger.Write(
+            result.Failed ? MonitorLogLevel.Warning : MonitorLogLevel.Information,
+            source,
+            "postaccept.build.completed",
+            result.Failed
+                ? "Post-accept watched solution build failed; index refresh is blocked. If the failure is a build output lock, stop the watched app/process and retry validation."
+                : "Post-accept watched solution build passed; index refresh may proceed.",
+            new Dictionary<string, string>
+            {
+                ["stagedRecordId"] = record.StagedRecordId,
+                ["watchedSolutionPath"] = settings.WatchedSolutionPath,
+                ["exitCode"] = result.ExitCode.ToString(),
+                ["timedOut"] = result.TimedOut.ToString(),
+                ["totalProjectsCompiled"] = result.Counts.TotalProjectsCompiled.ToString(),
+                ["totalSucceeded"] = result.Counts.TotalSucceeded.ToString(),
+                ["totalFailed"] = result.Counts.TotalFailed.ToString(),
+                ["summaryJsonPath"] = result.SummaryJsonPath,
+                ["rawOutputPath"] = result.RawOutputPath
+            });
+        return result;
+    }
+
+    private static string EnsureTrailingDirectorySeparator(string path)
+    {
+        return path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            || path.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            ? path
+            : path + Path.DirectorySeparatorChar;
     }
 
     private static PreMergeValidationResult? ValidateTerminalPlannedOverlay(
@@ -103,8 +244,13 @@ public sealed class StagedDecisionWorkflow
         return validation;
     }
 
-    private static string CreateNextStep(StagedEditRecord record, PostAcceptIndexRefreshResult? indexRefresh)
+    private static string CreateNextStep(StagedEditRecord record, PostAcceptIndexRefreshResult? indexRefresh, BuildResult? postAcceptBuild)
     {
+        if (postAcceptBuild?.Failed == true)
+        {
+            return "Accept recorded, but the post-accept watched solution build failed. Index refresh was skipped; rebuild before trusting index queries. If the failure is a build output lock, have the agent stop the watched app/process and rerun validation before refreshing the index.";
+        }
+
         if (indexRefresh?.IsError == true)
         {
             return "Accept recorded, but the index rebuild failed. Index rows are stale. Re-run refresh_solution_index before trusting index queries.";
@@ -113,6 +259,11 @@ public sealed class StagedDecisionWorkflow
         if (indexRefresh?.Status.Equals("deferred", StringComparison.OrdinalIgnoreCase) == true)
         {
             return "Decision recorded. Index refresh is deferred until all declared session edit files are decided.";
+        }
+
+        if (indexRefresh?.Status.Equals("skipped", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "Decision recorded. Index refresh was skipped because the accepted file set contains no indexed source files. Run edit refresh before further edits to this watched file.";
         }
 
         return record.Classification is "accepted" or "accepted-normalized"

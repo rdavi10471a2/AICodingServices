@@ -21,10 +21,18 @@ public sealed class ClaudeSmokesPhase6ValidationTests
         File.WriteAllText(refresh.WorkingFilePath, "namespace Example { internal static class Program { static int M() => 0; } }");
 
         // Inject a CS0103 (undefined name) — a SEMANTIC error.
-        ReplaceTextResult result = service.ReplaceText(programFilePath, "0", "MissingThing", expectedMatches: 1);
+        TextSpanResult span = service.FindTextSpan(programFilePath, "0");
+        EditSessionStatus result = service.ReplaceSpan(
+            programFilePath,
+            span.StartLine,
+            span.StartColumn,
+            span.EndLine,
+            span.EndColumn,
+            "MissingThing",
+            expectedOldText: "0");
 
         // Edit is NOT blocked by the semantic error (the overlay is feedback, not a gate).
-        Assert.True(result.Changed);
+        Assert.Equal(1, result.OperationCount);
         // ...but the structured overlay diagnostics ARE surfaced as feedback.
         Assert.NotNull(result.OverlayValidation);
         Assert.Equal("compiled-with-errors", result.OverlayValidation!.Status);

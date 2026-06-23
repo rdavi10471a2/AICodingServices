@@ -1,3 +1,4 @@
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Indexing;
@@ -25,6 +26,8 @@ public sealed class ReviewDecisionWithIndexRefreshResult
     public StagedEditRecord? StagedRecord { get; set; }
 
     public PostAcceptIndexRefreshResult? IndexRefresh { get; set; }
+
+    public BuildResult? PostAcceptBuild { get; set; }
 
     public PreMergeValidationResult? TerminalPreMergeValidation { get; set; }
 

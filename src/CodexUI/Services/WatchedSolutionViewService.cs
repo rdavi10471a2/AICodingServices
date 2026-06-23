@@ -9,22 +9,30 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
 {
     private readonly ICodexUiMonitorSettingsProvider settingsProvider;
     private readonly IWorkspaceStatusService workspaceStatusService;
+
+    private readonly DemoWorkspaceService demoWorkspaceService;
     private readonly WatchedSolutionIndexRepository watchedSolutionIndexRepository;
 
     public WatchedSolutionViewService(
         ICodexUiMonitorSettingsProvider settingsProvider,
         IWorkspaceStatusService workspaceStatusService,
+        DemoWorkspaceService demoWorkspaceService,
         WatchedSolutionIndexRepository watchedSolutionIndexRepository)
     {
         this.settingsProvider = settingsProvider;
         this.workspaceStatusService = workspaceStatusService;
+        this.demoWorkspaceService = demoWorkspaceService;
         this.watchedSolutionIndexRepository = watchedSolutionIndexRepository;
     }
 
-    public WatchedSolutionViewModel GetView(string? selectedRelativePath, int? selectedLine)
+    public WatchedSolutionViewModel GetView(string? selectedRelativePath, int? selectedLine, string? selectedDemoPath = null)
     {
         MonitorSettings settings = settingsProvider.GetSettings();
         WorkspaceStatusViewModel workspace = workspaceStatusService.EnsureWorkspace();
+        IReadOnlyList<DemoWorkspaceFileSummary> demoSummaries = demoWorkspaceService.ListDemoFiles();
+        SourceFileViewModel? selectedDemoFile = LoadSelectedDemoFile(selectedDemoPath, selectedLine);
+        IReadOnlyList<SourceFileNodeViewModel> demoFiles = BuildDemoFileNodes(demoSummaries, selectedDemoFile);
+        IReadOnlyList<SourceTreeNodeViewModel> demoTree = BuildDemoTree(demoSummaries, selectedDemoFile);
         string watchedRoot = Path.GetDirectoryName(settings.WatchedSolutionPath) ?? settings.WatchedProjectFolder;
         if (string.IsNullOrWhiteSpace(watchedRoot) || !Directory.Exists(watchedRoot))
         {
@@ -34,8 +42,11 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
                 "Watched solution folder was not found.",
                 [],
                 [],
+                demoFiles,
+                demoTree,
                 workspace,
-                null);
+                selectedDemoFile,
+                selectedDemoFile is not null);
         }
 
         WatchedSolutionIndexSnapshot snapshot = watchedSolutionIndexRepository.LoadSnapshot(settings);
@@ -50,11 +61,20 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
                 "Index is empty. Rebuild the index to load the solution tree.",
                 [],
                 [],
+                demoFiles,
+                demoTree,
                 workspace,
-                null);
+                selectedDemoFile,
+                selectedDemoFile is not null);
         }
 
-        IReadOnlyList<SourceFileNodeViewModel> files = BuildFileNodes(watchedRoot, documents, symbols, selectedRelativePath, selectedLine, out SourceFileViewModel? selectedFile);
+        SourceFileViewModel? selectedFile = selectedDemoFile;
+        IReadOnlyList<SourceFileNodeViewModel> files = BuildFileNodes(watchedRoot, documents, symbols, selectedDemoFile is null ? selectedRelativePath : null, selectedLine, out SourceFileViewModel? watchedSelectedFile);
+        if (selectedFile is null)
+        {
+            selectedFile = watchedSelectedFile;
+        }
+
         IReadOnlyList<SourceTreeNodeViewModel> tree = BuildTree(projects, documents, symbols, watchedRoot, selectedFile);
 
         return new WatchedSolutionViewModel(
@@ -63,8 +83,11 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
             selectedFile is null ? "Select a source file." : "Read-only source view.",
             files,
             tree,
+            demoFiles,
+            demoTree,
             workspace,
-            selectedFile);
+            selectedFile,
+            selectedDemoFile is not null);
     }
 
     private static IReadOnlyList<SourceFileNodeViewModel> BuildFileNodes(
@@ -93,6 +116,77 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
                 Path.GetExtension(path).TrimStart('.').ToUpperInvariant(),
                 string.Equals(path, selectedPath, StringComparison.OrdinalIgnoreCase),
                 BuildOutlineFromIndex(symbols, watchedRoot, path, selected)))
+            .ToArray();
+    }
+
+    private SourceFileViewModel? LoadSelectedDemoFile(string? selectedDemoPath, int? selectedLine)
+    {
+        if (string.IsNullOrWhiteSpace(selectedDemoPath))
+        {
+            return null;
+        }
+
+        DemoWorkspaceFile demoFile = demoWorkspaceService.ReadDemoFile(selectedDemoPath);
+        string[] lines = demoFile.Content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        int safeSelectedLine = Math.Clamp(selectedLine ?? 1, 1, Math.Max(lines.Length, 1));
+        return new SourceFileViewModel(
+            demoFile.RelativePath,
+            demoFile.FullPath,
+            GetLanguage(Path.GetExtension(demoFile.FullPath)),
+            safeSelectedLine,
+            lines);
+    }
+
+    private static IReadOnlyList<SourceFileNodeViewModel> BuildDemoFileNodes(
+    IReadOnlyList<DemoWorkspaceFileSummary> demos,
+    SourceFileViewModel? selectedDemoFile)
+    {
+        return demos
+            .OrderBy(demo => demo.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(demo => new SourceFileNodeViewModel(
+                demo.RelativePath,
+                Path.GetFileName(demo.RelativePath),
+                Path.GetExtension(demo.RelativePath).TrimStart('.').ToUpperInvariant(),
+                selectedDemoFile is not null && PathEquals(selectedDemoFile.FullPath, demo.FullPath),
+                []))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<SourceTreeNodeViewModel> BuildDemoTree(
+    IReadOnlyList<DemoWorkspaceFileSummary> demos,
+    SourceFileViewModel? selectedDemoFile)
+    {
+        MutableTreeNode root = new(string.Empty, true);
+        foreach (DemoWorkspaceFileSummary demo in demos.OrderBy(demo => demo.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            string[] segments = NormalizePath(demo.RelativePath).Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                continue;
+            }
+
+            MutableTreeNode current = root;
+            for (int index = 0; index < segments.Length; index++)
+            {
+                bool isFile = index == segments.Length - 1;
+                current = current.GetOrAdd(segments[index], !isFile);
+                current.LinkKind = SourceTreeLinkKind.Demo;
+                if (!isFile)
+                {
+                    continue;
+                }
+
+                current.RelativePath = demo.RelativePath;
+                current.Extension = Path.GetExtension(demo.RelativePath).TrimStart('.').ToUpperInvariant();
+                current.IsSelected = selectedDemoFile is not null && PathEquals(selectedDemoFile.FullPath, demo.FullPath);
+                current.Kind = "file";
+                current.Line = 1;
+            }
+        }
+
+        return root.Children
+            .OrderBy(node => node.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(ConvertTreeNode)
             .ToArray();
     }
 
@@ -192,7 +286,8 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
             node.Line,
             node.Kind,
             children,
-            node.Outline);
+            node.Outline,
+            node.LinkKind);
     }
 
     private static int GetTreeNodeRank(MutableTreeNode node)
@@ -597,6 +692,8 @@ public sealed class WatchedSolutionViewService : IWatchedSolutionViewService
         public int Line { get; set; }
 
         public string Kind { get; set; }
+
+        public string LinkKind { get; set; } = SourceTreeLinkKind.Watched;
 
         public IReadOnlyList<SourceOutlineNodeViewModel> Outline { get; set; } = [];
 

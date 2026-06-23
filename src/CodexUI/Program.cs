@@ -1,3 +1,4 @@
+using AICodingServices.Core;
 using CodexUI.Components;
 using CodexUI.Data.Repositories;
 using AICodingServices.McpHub;
@@ -20,6 +21,7 @@ public static class Program
         };
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(options);
+        CodexUiHostingDefaults.ApplyDefaultUrl(builder, args);
         StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
 
         builder.Services.AddRazorComponents()
@@ -31,10 +33,16 @@ public static class Program
         builder.Services.AddHostedService(
             services => services.GetRequiredService<McpServerProcessService>());
         builder.Services.AddSingleton<ICodexUiMonitorSettingsProvider, CodexUiMonitorSettingsProvider>();
+        builder.Services.AddScoped(services =>
+        {
+            ICodexUiMonitorSettingsProvider settingsProvider = services.GetRequiredService<ICodexUiMonitorSettingsProvider>();
+            return new StagedReviewPageService(settingsProvider.GetSettings());
+        });
         builder.Services.AddSingleton<WatchedSolutionIndexRepository>();
         builder.Services.AddSingleton<WorkspaceRepository>();
         builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();
         builder.Services.AddSingleton<ICodexUsageSummaryService, CodexUsageSummaryService>();
+        builder.Services.AddSingleton(services => new DemoWorkspaceService(services.GetRequiredService<ICodexUiMonitorSettingsProvider>().GetSettings()));
         builder.Services.AddSingleton<LiveMcpTelemetryService>();
         builder.Services.AddSingleton<IMcpTelemetrySink>(
             services => services.GetRequiredService<LiveMcpTelemetryService>());

@@ -12,7 +12,7 @@
                 else
                 {
                     <a class="tree-label tree-symbol-link @(Node.IsSelected ? "selected" : null)"
-                       href="@BuildFileHref(Node.RelativePath, Node.Line)#line-@Node.Line"
+                       href="@BuildFileHref(Node.RelativePath, Node.Line, Node.LinkKind)#line-@Node.Line"
                        title="@Node.Name"
                        @onclick:stopPropagation="true">@Node.Name</a>
                 }
@@ -30,7 +30,7 @@ else if (Node.RelativePath is not null)
 {
     <div class="tree-file-row">
         <a class="source-file-link @(Node.IsSelected ? "selected" : null)"
-           href="@BuildFileHref(Node.RelativePath, Node.Line)"
+           href="@BuildFileHref(Node.RelativePath, Node.Line, Node.LinkKind)"
            title="@Node.RelativePath"
            @onclick:stopPropagation="true">
             <span class="file-icon" aria-hidden="true">@GetFileIcon(Node.Extension, Node.Kind)</span>
@@ -43,9 +43,10 @@ else if (Node.RelativePath is not null)
     [Parameter]
     public required SourceTreeNodeViewModel Node { get; set; }
 
-    private static string BuildFileHref(string relativePath, int line)
+    private static string BuildFileHref(string relativePath, int line, string linkKind)
     {
-        return $"/watched-solution?path={Uri.EscapeDataString(relativePath)}&line={line}";
+        string queryName = linkKind == SourceTreeLinkKind.Demo ? "demoPath" : "path";
+        return $"/watched-solution?{queryName}={Uri.EscapeDataString(relativePath)}&line={line}";
     }
 
     private static bool ShouldExpand(SourceTreeNodeViewModel node)

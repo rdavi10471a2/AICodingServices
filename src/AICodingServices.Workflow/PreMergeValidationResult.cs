@@ -1,3 +1,5 @@
+using AICodingServices.MSBuild;
+
 namespace AICodingServices.Workflow;
 
 public sealed class PreMergeValidationResult
@@ -11,6 +13,10 @@ public sealed class PreMergeValidationResult
     public string[] Diagnostics { get; set; } = [];
 
     public string ValidationWorkspacePath { get; set; } = string.Empty;
+
+    public GovernedCommandReductionResult[] CommandReductions { get; set; } = [];
+
+    public BuildProjectSummary[] BuildSummaries { get; set; } = [];
 
     public string Message { get; set; } = string.Empty;
 }

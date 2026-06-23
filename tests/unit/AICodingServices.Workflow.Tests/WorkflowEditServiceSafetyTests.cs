@@ -1,4 +1,5 @@
 using AICodingServices.Core;
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Workflow.Tests;
@@ -211,22 +212,44 @@ public sealed class WorkflowEditServiceSafetyTests
     }
 
     [Fact]
-    public void Text_edit_can_defer_overlay_validation_until_planned_working_set_is_complete()
+    public void ReplaceText_rejects_csharp_watched_source_before_writing_candidate()
     {
         WorkflowFixture fixture = CreateFixture();
         WorkflowEditService service = new(fixture.Settings);
         EditSessionStatus refresh = service.Refresh(fixture.ProgramFilePath);
+        string originalWorkingText = File.ReadAllText(refresh.WorkingFilePath);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            service.ReplaceText(
+                fixture.ProgramFilePath,
+                "internal static class Program { }",
+                "internal static class Program { public static string Value => \"blocked\"; }",
+                expectedMatches: 1));
+
+        Assert.Contains("replace_text_in_file is not allowed for C#", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalWorkingText, File.ReadAllText(refresh.WorkingFilePath));
+        Assert.Equal(0, service.GetStatus(fixture.ProgramFilePath).OperationCount);
+    }
+
+    [Fact]
+    public void Text_edit_can_defer_overlay_validation_until_planned_working_set_is_complete()
+    {
+        WorkflowFixture fixture = CreateFixture();
+        WorkflowEditService service = new(fixture.Settings);
+        string razorPath = Path.Combine(Path.GetDirectoryName(fixture.ProgramFilePath)!, "Widget.razor");
+        File.WriteAllText(razorPath, "<h1>old</h1>");
+        EditSessionStatus refresh = service.Refresh(razorPath);
 
         ReplaceTextResult result = service.ReplaceText(
-            fixture.ProgramFilePath,
-            "internal static class Program { }",
-            "internal static class Program { public static string Value => \"planned\"; }",
+            razorPath,
+            "old",
+            "planned",
             expectedMatches: 1,
             validateOverlay: false);
 
         Assert.Equal("planned-overlay-pending", result.OverlayValidation?.Status);
         Assert.False(result.OverlayValidation?.HasErrors);
-        Assert.Contains("\"planned\"", File.ReadAllText(refresh.WorkingFilePath), StringComparison.Ordinal);
+        Assert.Contains("planned", File.ReadAllText(refresh.WorkingFilePath), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -487,14 +510,16 @@ public sealed class WorkflowEditServiceSafetyTests
     {
         WorkflowFixture fixture = CreateFixture();
         WorkflowEditService service = new(fixture.Settings);
-        EditSessionStatus refresh = service.Refresh(fixture.ProgramFilePath);
-        File.WriteAllText(refresh.WorkingFilePath, "namespace Example { internal static class Program { public static string First => \"same\"; public static string Second => \"same\"; } }");
+        string textFilePath = Path.Combine(Path.GetDirectoryName(fixture.ProgramFilePath)!, "Notes.txt");
+        File.WriteAllText(textFilePath, "first same second same");
+        EditSessionStatus refresh = service.Refresh(textFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, "first same second same");
 
-        TextSpanResult span = service.FindTextSpan(fixture.ProgramFilePath, "\"same\"", occurrenceIndex: 1);
+        TextSpanResult span = service.FindTextSpan(textFilePath, "same", occurrenceIndex: 1);
         ReplaceTextResult result = service.ReplaceText(
-            fixture.ProgramFilePath,
-            "\"same\"",
-            "\"changed\"",
+            textFilePath,
+            "same",
+            "changed",
             occurrenceIndex: 1,
             manifestJson: """{"tool":"replace"}""");
 
@@ -532,6 +557,47 @@ public sealed class WorkflowEditServiceSafetyTests
         Assert.Contains(result.OverlayValidation.Diagnostics, diagnostic => diagnostic.Id == "CS0103");
     }
 
+    [Fact]
+    public void Roslyn_submit_symbol_preserves_existing_attributes_and_documentation()
+    {
+        WorkflowFixture fixture = CreateFixture();
+        File.WriteAllText(
+            fixture.ProgramFilePath,
+            """
+        namespace Example;
+
+        internal static class Program
+        {
+            /// <summary>
+            /// Keep this doc.
+            /// </summary>
+            [Obsolete("keep")]
+            public static string Value()
+            {
+                return "original";
+            }
+        }
+        """);
+        WorkflowEditService service = new(fixture.Settings);
+        service.Refresh(fixture.ProgramFilePath);
+        RoslynEditService roslyn = new(fixture.Settings);
+
+        RoslynEditResult result = roslyn.SubmitSymbol(
+            fixture.ProgramFilePath,
+            """{"name":"Value","memberKind":"method","containingType":"Program"}""",
+            """
+        public static string Value()
+        {
+            return "candidate";
+        }
+        """);
+
+        string content = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("/// <summary>", content, StringComparison.Ordinal);
+        Assert.Contains("[Obsolete(\"keep\")]", content, StringComparison.Ordinal);
+        Assert.Contains("return \"candidate\";", content, StringComparison.Ordinal);
+    }
+
 
     [Fact]
     public void PreMergeValidation_uses_real_tree_overlay_for_test_project_edits()
@@ -546,7 +612,18 @@ public sealed class WorkflowEditServiceSafetyTests
 
         Assert.True(validation.IsError);
         Assert.Equal("failed", validation.Status);
-        Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("CS1525", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("dotnet build exited with code 1", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.ExitCode == 1
+                && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
+                && reduction.VisibleOutput.Contains("Total Failed:", StringComparison.OrdinalIgnoreCase)
+                && !reduction.VisibleOutput.Contains("Build FAILED.", StringComparison.OrdinalIgnoreCase));
+        Assert.All(
+            validation.CommandReductions,
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(fixture.SmokeFilePath)!, "obj", "Debug", "net10.0", "apphost.exe")));
     }
 
@@ -563,6 +640,22 @@ public sealed class WorkflowEditServiceSafetyTests
 
         Assert.False(validation.IsError, string.Join(Environment.NewLine, validation.Diagnostics));
         Assert.Equal("passed", validation.Status);
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(validation.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
+        Assert.All(
+            validation.CommandReductions,
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
+                && reduction.VisibleOutput.Contains("Total Failed: 0", StringComparison.OrdinalIgnoreCase)
+                && !reduction.VisibleOutput.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            validation.BuildSummaries,
+            summary => summary.Phase == BuildValidationPhase.Overlay
+                && summary.Counts.TotalProjectsCompiled > 0
+                && summary.Counts.TotalFailed == 0);
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }

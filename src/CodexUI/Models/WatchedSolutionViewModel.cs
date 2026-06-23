@@ -6,8 +6,11 @@ public sealed record WatchedSolutionViewModel(
     string Status,
     IReadOnlyList<SourceFileNodeViewModel> Files,
     IReadOnlyList<SourceTreeNodeViewModel> Tree,
+    IReadOnlyList<SourceFileNodeViewModel> DemoFiles,
+    IReadOnlyList<SourceTreeNodeViewModel> DemoTree,
     WorkspaceStatusViewModel Workspace,
-    SourceFileViewModel? SelectedFile)
+    SourceFileViewModel? SelectedFile,
+    bool IsDemoSelected)
 {
     public static WatchedSolutionViewModel Empty { get; } = new(
         string.Empty,
@@ -15,6 +18,9 @@ public sealed record WatchedSolutionViewModel(
         "No watched solution configured.",
         [],
         [],
+        [],
+        [],
         WorkspaceStatusViewModel.Empty,
-        null);
+        null,
+        false);
 }

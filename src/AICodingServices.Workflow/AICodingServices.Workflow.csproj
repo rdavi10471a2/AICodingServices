@@ -2,10 +2,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AICodingServices.Core\AICodingServices.Core.csproj" />
+    <ProjectReference Include="..\AICodingServices.MSBuild\AICodingServices.MSBuild.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
   </ItemGroup>
 
   <PropertyGroup>

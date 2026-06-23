@@ -22,8 +22,8 @@ A typed multigraph `G = (N, E)`, built fresh per invocation from MCP, never stor
 
 | Altitude | Source | Identity | Role |
 |---|---|---|---|
-| **A0 Project** | `list_watched_projects` / `get_solution_index_tree` top level | `projects.stable_key` (MSBuild `StableProjectKey`) | `Folder.aim.md` project band + the cross-project context band of a focus diagram. |
-| **A1 Document/file** | `get_solution_index_tree` Files / `IndexedDocumentRow` | `FilePath` (carries `ContentHash`) | The node a per-file `SomeClass.aim.md` is written for; the freshness anchor. |
+| **A0 Project** | `list_watched_projects` plus scoped project/index metadata | `projects.stable_key` (MSBuild `StableProjectKey`) | `Folder.aim.md` project band + the cross-project context band of a focus diagram. |
+| **A1 Document/file** | `query_solution_index(scope=file|folder|solution)` / `IndexedDocumentRow` | `FilePath` (carries `ContentHash`) | The node a per-file `SomeClass.aim.md` is written for; the freshness anchor. |
 | **A2 Type** | `find_indexed_symbols`, `Kind = NamedType` | `StableKey` | Default focus node for "explain THIS code". |
 | **A3 Member** | `find_indexed_symbols`, `Kind ∈ {Method, Property, Field, Event, Constructor}` | `StableKey`; `ContainingType` → A2, `FilePath` → A1 | Member-level `Used By` / `Key Methods`. |
 
@@ -226,7 +226,7 @@ Controls:
 | Inbound `Used By` (E_call) | `find_indexed_callers(stableKey)` → `IndexedCallSiteRow[]` → **CallerVerified** |
 | Inbound + outbound refs (E_ref) | `find_indexed_references(stableKey)` → `IndexedReferenceRow[]`; `Caller*` populated ⇒ IndexVerified, empty ⇒ NameInferred; empty `TargetName/Kind` ⇒ external footnote |
 | Structural (E_rel) | `find_indexed_relationships(stableKey, direction, kind?)` → all 7 kinds in one call; **intra-project only** |
-| Project band (E_projref) | `list_watched_projects` + `get_solution_index_tree` → A0 + `project_references`; reuse `SelfModelGraphSource` reduction (DAG band only) |
+| Project band (E_projref) | `list_watched_projects` + scoped project-reference/index metadata -> A0 + `project_references`; reuse `SelfModelGraphSource` reduction (DAG band only) |
 | Freshness gate | `get_solution_index_status` / `get_monitor_status` → `IndexedAtUtc` + `StaleFileCount`; compare focus `ContentHash` (`check_file_hash`) to manifest → Stale banner |
 | Non-C# fallback | `find_text_span` → **GrepBacked** edges for Razor markup / SQL only |
 

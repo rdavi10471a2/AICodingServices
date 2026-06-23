@@ -18,10 +18,18 @@
 }
 
 .telemetry-title {
-    font-size: 1.8rem;
+    font-size: 1.35rem;
     font-weight: 750;
     letter-spacing: 0;
-    line-height: 1;
+    line-height: 1.1;
+    margin: 0;
+}
+
+::deep .telemetry-title {
+    font-size: 1.35rem;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1.1;
     margin: 0;
 }
 

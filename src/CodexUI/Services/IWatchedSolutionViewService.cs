@@ -4,5 +4,5 @@ namespace CodexUI.Services;
 
 public interface IWatchedSolutionViewService
 {
-    WatchedSolutionViewModel GetView(string? selectedRelativePath, int? selectedLine);
+    WatchedSolutionViewModel GetView(string? selectedRelativePath, int? selectedLine, string? selectedDemoPath = null);
 }
