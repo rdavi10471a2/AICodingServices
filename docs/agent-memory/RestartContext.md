@@ -64,6 +64,25 @@ Expected healthy result: site reachable at `http://localhost:5000/`, active tran
 - Keep only the current operational handoff here.
 - Move superseded restart notes out instead of stacking them in this file.
 
+---
+
+## Session: New Evaluation Task (2026-06-22)
+
+**Branch:** `codex/semantic-kernel-workflow-orchestrator`  
+**Status:** Checkpointed, starting fresh evaluation from `main`  
+**Latest commit:** `66069da` - "Update proposal: skill card guidance gate integrated"
+
+### What Was Completed (Instructive Governance)
+
+1. `ToolSelectionGuidance` model with Reason, Alternative, Hints
+2. `get_tool_selection_guidance` MCP tool
+3. ~40 tests covering all scenarios
+4. Skill card guidance gate documented (96d9f4c)
+
+### Next: Fresh evaluation starting from main
+
+---
+
 ## Session: SK Instructive Governance Planning (2026-06-21)
 
 ### Branch
