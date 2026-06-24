@@ -43,6 +43,11 @@ public sealed class StagedReviewPageService
         WorkflowEditService workflowService = new(settings);
         StagedEditRecord record = workflowService.GetStagedRecord(stagedRecordId);
         WorkflowEditService.EnsureRecordNotDecided(record);
+        StagedReviewDecisionOptions decisionOptions = CreateDecisionOptions(
+            record,
+            GetSessionRecords(workflowService, record),
+            "accepted");
+        EnsureTerminalValidationPassesBeforeCopy(record, decisionOptions);
 
         if (!File.Exists(record.StagedFilePath))
         {
@@ -60,7 +65,8 @@ public sealed class StagedReviewPageService
             workflowService,
             record,
             "accepted",
-            record.StagedHash);
+            record.StagedHash,
+            decisionOptions);
         StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
         return new StagedReviewPageActionResult(
             CreateModel(decided),
@@ -76,7 +82,8 @@ public sealed class StagedReviewPageService
             workflowService,
             record,
             "rejected",
-            expectedStagedHash: null);
+            expectedStagedHash: null,
+            decisionOptions: null);
         StagedEditRecord decided = workflowService.GetStagedRecord(record.StagedRecordId);
         return new StagedReviewPageActionResult(
             CreateModel(decided),
@@ -87,9 +94,10 @@ public sealed class StagedReviewPageService
         WorkflowEditService workflowService,
         StagedEditRecord record,
         string decision,
-        string? expectedStagedHash)
+        string? expectedStagedHash,
+        StagedReviewDecisionOptions? decisionOptions)
     {
-        StagedReviewDecisionOptions decisionOptions = CreateDecisionOptions(
+        StagedReviewDecisionOptions resolvedDecisionOptions = decisionOptions ?? CreateDecisionOptions(
             record,
             GetSessionRecords(workflowService, record),
             decision);
@@ -101,9 +109,33 @@ public sealed class StagedReviewPageService
             decision,
             expectedStagedHash,
             nameof(CodexUI),
-            deferIndexRefresh: decisionOptions.DeferIndexRefresh,
-            refreshPlan: decisionOptions.RefreshPlan,
-            terminalValidationRecords: decisionOptions.TerminalValidationRecords);
+            deferIndexRefresh: resolvedDecisionOptions.DeferIndexRefresh,
+            refreshPlan: resolvedDecisionOptions.RefreshPlan,
+            terminalValidationRecords: resolvedDecisionOptions.TerminalValidationRecords);
+    }
+
+    private void EnsureTerminalValidationPassesBeforeCopy(
+        StagedEditRecord record,
+        StagedReviewDecisionOptions decisionOptions)
+    {
+        if (decisionOptions.DeferIndexRefresh
+            || decisionOptions.RefreshPlan is null
+            || decisionOptions.RefreshPlan.ChangedFilePaths.Count == 0
+            || decisionOptions.TerminalValidationRecords.Count == 0)
+        {
+            return;
+        }
+
+        PreMergeValidationResult validation = new PreMergeValidationService().Validate(
+            settings,
+            record,
+            decisionOptions.TerminalValidationRecords);
+        if (validation.IsError && !record.PreMergeValidationForceApproved)
+        {
+            throw new InvalidOperationException(
+                "Terminal planned pre-merge validation failed before copying the staged candidate into source: "
+                + validation.Message);
+        }
     }
 
     private IMonitorLogger CreateLogger()

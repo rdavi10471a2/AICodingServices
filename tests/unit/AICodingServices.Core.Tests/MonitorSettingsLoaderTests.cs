@@ -30,6 +30,34 @@ public sealed class MonitorSettingsLoaderTests
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(root, "runtime"), settings.RuntimeRoot);
         Assert.Equal(Path.Combine(config, "tools", "WinMergeU.exe"), Assert.Single(settings.WinMergeCandidatePaths));
+        Assert.Equal("Browser", settings.DefaultReviewSurface);
+        Assert.Equal("http://localhost:5000", settings.BrowserReviewBaseUrl);
+    }
+
+    [Fact]
+    public async Task Load_reads_browser_review_settings()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "AICodingServicesTests", Guid.NewGuid().ToString("N"));
+        string config = Path.Combine(root, "config");
+        Directory.CreateDirectory(config);
+        string solutionPath = Path.Combine(root, "Fixture.slnx");
+        string settingsPath = Path.Combine(config, "appsettings.json");
+        await File.WriteAllTextAsync(solutionPath, "<Solution />");
+        await File.WriteAllTextAsync(settingsPath, $$"""
+            {
+              "Monitor": {
+                "WatchedSolutionPath": "{{solutionPath.Replace("\\", "\\\\")}}",
+                "RuntimeRoot": "runtime",
+                "DefaultReviewSurface": "WinMerge",
+                "BrowserReviewBaseUrl": "http://127.0.0.1:5001/"
+              }
+            }
+            """);
+
+        MonitorSettings settings = MonitorSettingsLoader.Load(root, settingsPath);
+
+        Assert.Equal("WinMerge", settings.DefaultReviewSurface);
+        Assert.Equal("http://127.0.0.1:5001", settings.BrowserReviewBaseUrl);
     }
 
     [Fact]
@@ -96,6 +124,36 @@ public sealed class MonitorSettingsLoaderTests
         Assert.Equal(Path.GetFullPath(solutionPath), settings.WatchedSolutionPath);
         Assert.Equal(Path.Combine(root, "runtime"), settings.RuntimeRoot);
         Assert.Equal(@"C:\Tools\WinMerge\WinMergeU.exe", Assert.Single(settings.WinMergeCandidatePaths));
+        Assert.Equal("Browser", settings.DefaultReviewSurface);
+        Assert.Equal("http://localhost:5000", settings.BrowserReviewBaseUrl);
+    }
+
+    [Fact]
+    public void SaveLocal_preserves_browser_review_settings()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "AICodingServicesTests", Guid.NewGuid().ToString("N"));
+        string solutionPath = Path.Combine(root, "Watched", "Fixture.sln");
+        string config = Path.Combine(root, "config");
+        string settingsFile = Path.Combine(config, "appsettings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(solutionPath)!);
+        Directory.CreateDirectory(config);
+        File.WriteAllText(solutionPath, string.Empty);
+        File.WriteAllText(settingsFile, """
+            {
+              "Monitor": {
+                "WatchedSolutionPath": "old.sln",
+                "RuntimeRoot": "runtime",
+                "DefaultReviewSurface": "WinMerge",
+                "BrowserReviewBaseUrl": "http://127.0.0.1:5050"
+              }
+            }
+            """);
+
+        string settingsPath = MonitorSettingsLoader.SaveLocal(root, solutionPath);
+        MonitorSettings settings = MonitorSettingsLoader.Load(root, settingsPath);
+
+        Assert.Equal("WinMerge", settings.DefaultReviewSurface);
+        Assert.Equal("http://127.0.0.1:5050", settings.BrowserReviewBaseUrl);
     }
 
     [Fact]

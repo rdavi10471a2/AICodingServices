@@ -10,14 +10,23 @@ public sealed class SyntheticEditWorkflowTokenBenchmarkTests
     public void Synthetic_large_file_edit_context_baseline()
     {
         string repositoryRoot = ResolveRepositoryRoot();
-        string sourcePath = Path.Combine(repositoryRoot, "src", "AICodingServices.McpServer", "Program.cs");
-        Assert.True(File.Exists(sourcePath), "Expected CodingServices MCP server Program.cs to exist for the synthetic benchmark.");
+        string sourceRoot = Path.Combine(repositoryRoot, "src", "AICodingServices.McpServer");
+        string[] sourcePaths =
+        [
+            Path.Combine(sourceRoot, "AICodingServicesTools.cs"),
+            Path.Combine(sourceRoot, "AICodingServicesTools.Indexing.cs"),
+            Path.Combine(sourceRoot, "AICodingServicesToolResults.cs")
+        ];
+        foreach (string sourcePath in sourcePaths)
+        {
+            Assert.True(File.Exists(sourcePath), $"Expected MCP server split source to exist for the synthetic benchmark: {sourcePath}");
+        }
 
         string outputRoot = Environment.GetEnvironmentVariable("SYNTHETIC_EDIT_BENCH_OUT")
             ?? Path.Combine(repositoryRoot, "runtime", "token-benchmark", "synthetic-edit");
         Directory.CreateDirectory(outputRoot);
 
-        string original = File.ReadAllText(sourcePath);
+        string original = ReadCombinedSource(sourcePaths);
         string synthetic = CreateSyntheticLargeFile(original);
         string syntheticPath = Path.Combine(outputRoot, "SyntheticAICodingServicesMcpServer.cs");
         File.WriteAllText(syntheticPath, synthetic);
@@ -59,7 +68,7 @@ public sealed class SyntheticEditWorkflowTokenBenchmarkTests
         string csvPath = Path.Combine(outputRoot, "synthetic-edit-measurements.csv");
         string summaryPath = Path.Combine(outputRoot, "synthetic-edit-summary.md");
         File.WriteAllText(csvPath, BuildCsv(rows));
-        File.WriteAllText(summaryPath, BuildSummary(sourcePath, syntheticPath, rows, manualTotalBytes, preciseToolTotalBytes, wholeFileToolTotalBytes));
+        File.WriteAllText(summaryPath, BuildSummary(sourcePaths, syntheticPath, rows, manualTotalBytes, preciseToolTotalBytes, wholeFileToolTotalBytes));
 
         Console.WriteLine(File.ReadAllText(summaryPath));
         Assert.True(preciseToolTotalBytes < manualTotalBytes, "Precise MCP-style text edits should use less context than repeated full-file manual reads.");
@@ -80,9 +89,21 @@ public sealed class SyntheticEditWorkflowTokenBenchmarkTests
                 "public sealed record SyntheticAICodingServicesRefreshIndexResult("),
             new SyntheticEdit(
                 "add-session-plan-reason-default",
-                "    string Role,\n    string Reason);",
-                "    string Role,\n    string Reason,\n    string SyntheticBenchmarkNote = \"precise-edit\");")
+                "    string Role,\r\n    string Reason);",
+                "    string Role,\r\n    string Reason,\r\n    string SyntheticBenchmarkNote = \"precise-edit\");")
         ];
+    }
+
+    private static string ReadCombinedSource(IReadOnlyList<string> sourcePaths)
+    {
+        StringBuilder builder = new();
+        foreach (string sourcePath in sourcePaths)
+        {
+            builder.AppendLine("// ---- " + Path.GetFileName(sourcePath) + " ----");
+            builder.AppendLine(File.ReadAllText(sourcePath));
+        }
+
+        return builder.ToString();
     }
 
     private static string CreateSyntheticLargeFile(string original)
@@ -134,7 +155,7 @@ public sealed class SyntheticEditWorkflowTokenBenchmarkTests
     }
 
     private static string BuildSummary(
-        string sourcePath,
+        IReadOnlyList<string> sourcePaths,
         string syntheticPath,
         IReadOnlyList<MeasurementRow> rows,
         long manualTotalBytes,
@@ -150,7 +171,12 @@ public sealed class SyntheticEditWorkflowTokenBenchmarkTests
         StringBuilder builder = new();
         builder.AppendLine("# Synthetic edit workflow token benchmark");
         builder.AppendLine();
-        builder.AppendLine($"source duplicated: `{sourcePath}`");
+        builder.AppendLine("source duplicated:");
+        foreach (string sourcePath in sourcePaths)
+        {
+            builder.AppendLine($"- `{sourcePath}`");
+        }
+
         builder.AppendLine($"synthetic file: `{syntheticPath}`");
         builder.AppendLine($"edit steps: {rows.Count.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine();
