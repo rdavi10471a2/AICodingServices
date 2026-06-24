@@ -3,7 +3,7 @@
     "aicodingservices": {
       "command": "dotnet",
       "args": [
-        ".\\src\\AICodingServices.McpStdioBridge\\bin\\Debug\\net10.0\\AICodingServices.McpStdioBridge.dll",
+        ".\\runtime\\mcp-bridge\\current\\AICodingServices.McpStdioBridge.dll",
         "--repo-root",
         ".",
         "--config",
