@@ -85,6 +85,7 @@ public sealed record AICodingServicesStagedDiffLaunchResult(
     StagedEditSummary StagedRecordSummary,
     StagedEditRecord? StagedRecord,
     PreMergeValidationResult PreMergeValidation,
+    GovernedCommandReductionResult[] CommandReductions,
     DiffLaunchResult DiffLaunch,
     string NextStep);
 

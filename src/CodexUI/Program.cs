@@ -31,6 +31,11 @@ public static class Program
         builder.Services.AddHostedService(
             services => services.GetRequiredService<McpServerProcessService>());
         builder.Services.AddSingleton<ICodexUiMonitorSettingsProvider, CodexUiMonitorSettingsProvider>();
+        builder.Services.AddScoped(services =>
+        {
+            ICodexUiMonitorSettingsProvider settingsProvider = services.GetRequiredService<ICodexUiMonitorSettingsProvider>();
+            return new StagedReviewPageService(settingsProvider.GetSettings());
+        });
         builder.Services.AddSingleton<WatchedSolutionIndexRepository>();
         builder.Services.AddSingleton<WorkspaceRepository>();
         builder.Services.AddSingleton<IWorkspaceStatusService, WorkspaceStatusService>();

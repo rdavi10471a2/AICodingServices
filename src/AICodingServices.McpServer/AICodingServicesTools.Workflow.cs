@@ -212,7 +212,7 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Run pre-merge validation, then launch WinMerge for a staged edit record and return review paths.")]
+    [Description("Run pre-merge validation, then launch the configured review surface for a staged edit record and return review paths.")]
     public AICodingServicesStagedDiffLaunchResult LaunchStagedDiff(
         [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
         [Description("Explicit diff tool executable path.")] string? diffToolPath = null,
@@ -236,6 +236,41 @@ public sealed partial class AICodingServicesTools
             result.StagedRecordSummary,
             result.StagedRecord,
             result.PreMergeValidation,
+            result.CommandReductions,
+            result.DiffLaunch,
+            result.NextStep);
+    }
+
+    [McpServerTool]
+    [Description("Run pre-merge validation, then launch the CodexUI browser staged review page for a staged edit record.")]
+    public AICodingServicesStagedDiffLaunchResult LaunchStagedBrowserReview(
+        [Description("Staged edit record id returned by stage_candidate_for_review.")] string stagedRecordId,
+        [Description("CodexUI base URL used to build /review/staged/{stagedRecordId}. Defaults to http://localhost:5000.")] string browserReviewBaseUrl = "http://localhost:5000",
+        [Description("Explicit browser executable path. When omitted, the system default browser handles the URL.")] string? browserPath = null,
+        [Description("Force launch after an explicit human validation override.")] bool forceValidation = false,
+        [Description("Return the full staged record inline for debugging. Defaults to compact response.")] bool verbose = false)
+    {
+        runtimeState.Touch();
+        StagedEditRecord stagedRecord = workflowService.GetStagedRecord(stagedRecordId);
+        bool deferBuildValidationUntilAccept = ShouldDeferBuildValidationUntilAccept(stagedRecord);
+        StagedDiffLaunchWorkflowResult result = new StagedDiffLaunchWorkflow().Launch(
+            settings,
+            logger,
+            workflowService,
+            stagedRecordId,
+            "AICodingServices.McpServer",
+            diffToolPath: null,
+            forceValidation: forceValidation,
+            deferBuildValidationUntilAccept: deferBuildValidationUntilAccept,
+            verbose: verbose,
+            launchSurface: StagedReviewLaunchSurface.Browser,
+            browserReviewBaseUrl: browserReviewBaseUrl,
+            browserPath: browserPath);
+        return new AICodingServicesStagedDiffLaunchResult(
+            result.StagedRecordSummary,
+            result.StagedRecord,
+            result.PreMergeValidation,
+            result.CommandReductions,
             result.DiffLaunch,
             result.NextStep);
     }

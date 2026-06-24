@@ -1,4 +1,5 @@
 using AICodingServices.Core;
+using AICodingServices.MSBuild;
 using AICodingServices.Workflow;
 
 namespace AICodingServices.Workflow.Tests;
@@ -546,7 +547,18 @@ public sealed class WorkflowEditServiceSafetyTests
 
         Assert.True(validation.IsError);
         Assert.Equal("failed", validation.Status);
-        Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("CS1525", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(validation.Diagnostics, diagnostic => diagnostic.Contains("dotnet build exited with code 1", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.ExitCode == 1
+                && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
+                && reduction.VisibleOutput.Contains("Total Failed:", StringComparison.OrdinalIgnoreCase)
+                && !reduction.VisibleOutput.Contains("Build FAILED.", StringComparison.OrdinalIgnoreCase));
+        Assert.All(
+            validation.CommandReductions,
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(fixture.SmokeFilePath)!, "obj", "Debug", "net10.0", "apphost.exe")));
     }
 
@@ -563,6 +575,22 @@ public sealed class WorkflowEditServiceSafetyTests
 
         Assert.False(validation.IsError, string.Join(Environment.NewLine, validation.Diagnostics));
         Assert.Equal("passed", validation.Status);
+        Assert.NotEmpty(validation.CommandReductions);
+        Assert.Contains(validation.CommandReductions, reduction => reduction.Kind == GovernedCommandKind.Build);
+        Assert.All(
+            validation.CommandReductions,
+            reduction => Assert.True(File.Exists(reduction.FullOutputArtifactPath), reduction.FullOutputArtifactPath));
+        Assert.Contains(
+            validation.CommandReductions,
+            reduction => reduction.Kind == GovernedCommandKind.Build
+                && reduction.VisibleOutput.Contains("Total Projects Compiled:", StringComparison.OrdinalIgnoreCase)
+                && reduction.VisibleOutput.Contains("Total Failed: 0", StringComparison.OrdinalIgnoreCase)
+                && !reduction.VisibleOutput.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            validation.BuildSummaries,
+            summary => summary.Phase == BuildValidationPhase.Overlay
+                && summary.Counts.TotalProjectsCompiled > 0
+                && summary.Counts.TotalFailed == 0);
         Assert.False(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "tests")));
         Assert.True(Directory.Exists(Path.Combine(validation.ValidationWorkspacePath, "artifacts")));
     }

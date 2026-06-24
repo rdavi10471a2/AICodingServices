@@ -49,6 +49,12 @@ body {
     font-weight: 700;
 }
 
+.brand-logo {
+    display: block;
+    height: 34px;
+    width: 34px;
+}
+
 .brand-name {
     font-size: 18px;
     font-weight: 650;

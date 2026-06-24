@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AICodingServices.Core\AICodingServices.Core.csproj" />
+    <ProjectReference Include="..\AICodingServices.MSBuild\AICodingServices.MSBuild.csproj" />
   </ItemGroup>
 
   <ItemGroup>

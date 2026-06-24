@@ -25,22 +25,30 @@ public static class MonitorSettingsLoader
             throw new FileNotFoundException("AICodingServices settings file was not found.", resolvedSettingsPath);
         }
 
-        using FileStream stream = File.OpenRead(resolvedSettingsPath);
-        using JsonDocument document = JsonDocument.Parse(stream);
-        JsonElement monitor = document.RootElement.GetProperty("Monitor");
-        string watchedSolutionPath = RequireString(monitor, "WatchedSolutionPath");
-        string runtimeRoot = GetString(monitor, "RuntimeRoot") ?? "runtime";
-        string settingsDirectory = Path.GetDirectoryName(resolvedSettingsPath) ?? resolvedRepositoryRoot;
-        IReadOnlyList<string> winMergeCandidatePaths = LoadWinMergeCandidatePaths(
-            monitor,
-            resolvedRepositoryRoot,
-            settingsDirectory);
+        using (FileStream stream = File.OpenRead(resolvedSettingsPath))
+        {
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                JsonElement monitor = document.RootElement.GetProperty("Monitor");
+                string watchedSolutionPath = RequireString(monitor, "WatchedSolutionPath");
+                string runtimeRoot = GetString(monitor, "RuntimeRoot") ?? "runtime";
+                string settingsDirectory = Path.GetDirectoryName(resolvedSettingsPath) ?? resolvedRepositoryRoot;
+                IReadOnlyList<string> winMergeCandidatePaths = LoadWinMergeCandidatePaths(
+                    monitor,
+                    resolvedRepositoryRoot,
+                    settingsDirectory);
+                string defaultReviewSurface = GetString(monitor, "DefaultReviewSurface") ?? "Browser";
+                string browserReviewBaseUrl = GetString(monitor, "BrowserReviewBaseUrl") ?? "http://localhost:5000";
 
-        return MonitorSettings.Create(
-            resolvedRepositoryRoot,
-            ResolvePath(watchedSolutionPath, settingsDirectory),
-            ResolvePath(runtimeRoot, resolvedRepositoryRoot),
-            ResolvePaths(winMergeCandidatePaths, settingsDirectory));
+                return MonitorSettings.Create(
+                    resolvedRepositoryRoot,
+                    ResolvePath(watchedSolutionPath, settingsDirectory),
+                    ResolvePath(runtimeRoot, resolvedRepositoryRoot),
+                    ResolvePaths(winMergeCandidatePaths, settingsDirectory),
+                    defaultReviewSurface,
+                    browserReviewBaseUrl);
+            }
+        }
     }
 
     public static string SaveLocal(
@@ -60,11 +68,21 @@ public static class MonitorSettingsLoader
         IReadOnlyList<string> existingWinMergeCandidatePaths = LoadExistingWinMergeCandidatePaths(
             resolvedSettingsPath,
             resolvedRepositoryRoot);
+        string existingDefaultReviewSurface = LoadExistingString(
+            resolvedSettingsPath,
+            "DefaultReviewSurface",
+            "Browser");
+        string existingBrowserReviewBaseUrl = LoadExistingString(
+            resolvedSettingsPath,
+            "BrowserReviewBaseUrl",
+            "http://localhost:5000");
         LocalSettingsFile file = new(
             new LocalMonitorSettings(
                 resolvedWatchedSolutionPath,
                 resolvedRuntimeRoot,
-                existingWinMergeCandidatePaths));
+                existingWinMergeCandidatePaths,
+                existingDefaultReviewSurface,
+                existingBrowserReviewBaseUrl));
         File.WriteAllText(resolvedSettingsPath, JsonSerializer.Serialize(file, SerializerOptions) + Environment.NewLine);
         return resolvedSettingsPath;
     }
@@ -139,16 +157,41 @@ public static class MonitorSettingsLoader
             return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
         }
 
-        using FileStream stream = File.OpenRead(settingsPath);
-        using JsonDocument document = JsonDocument.Parse(stream);
-        if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor))
+        using (FileStream stream = File.OpenRead(settingsPath))
         {
-            return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor))
+                {
+                    return LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+                }
+
+                return TryGetStringArray(monitor, "WinMergeCandidatePaths", out IReadOnlyList<string> existingPaths)
+                    ? existingPaths
+                    : LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+            }
+        }
+    }
+
+    private static string LoadExistingString(string settingsPath, string propertyName, string defaultValue)
+    {
+        if (!File.Exists(settingsPath))
+        {
+            return defaultValue;
         }
 
-        return TryGetStringArray(monitor, "WinMergeCandidatePaths", out IReadOnlyList<string> existingPaths)
-            ? existingPaths
-            : LoadTemplateWinMergeCandidatePaths(resolvedRepositoryRoot);
+        using (FileStream stream = File.OpenRead(settingsPath))
+        {
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor))
+                {
+                    return defaultValue;
+                }
+
+                return GetString(monitor, propertyName) ?? defaultValue;
+            }
+        }
     }
 
     private static IReadOnlyList<string> LoadTemplateWinMergeCandidatePaths(string resolvedRepositoryRoot)
@@ -159,16 +202,20 @@ public static class MonitorSettingsLoader
             return [];
         }
 
-        using FileStream stream = File.OpenRead(templatePath);
-        using JsonDocument document = JsonDocument.Parse(stream);
-        if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor)
-            || !TryGetStringArray(monitor, "WinMergeCandidatePaths", out IReadOnlyList<string> templatePaths))
+        using (FileStream stream = File.OpenRead(templatePath))
         {
-            return [];
-        }
+            using (JsonDocument document = JsonDocument.Parse(stream))
+            {
+                if (!document.RootElement.TryGetProperty("Monitor", out JsonElement monitor)
+                    || !TryGetStringArray(monitor, "WinMergeCandidatePaths", out IReadOnlyList<string> templatePaths))
+                {
+                    return [];
+                }
 
-        string templateDirectory = Path.GetDirectoryName(templatePath) ?? resolvedRepositoryRoot;
-        return ResolvePaths(templatePaths, templateDirectory);
+                string templateDirectory = Path.GetDirectoryName(templatePath) ?? resolvedRepositoryRoot;
+                return ResolvePaths(templatePaths, templateDirectory);
+            }
+        }
     }
 
     private static string ResolvePath(string path, string baseDirectory)
@@ -190,5 +237,7 @@ public static class MonitorSettingsLoader
     private sealed record LocalMonitorSettings(
         string WatchedSolutionPath,
         string RuntimeRoot,
-        IReadOnlyList<string> WinMergeCandidatePaths);
+        IReadOnlyList<string> WinMergeCandidatePaths,
+        string DefaultReviewSurface,
+        string BrowserReviewBaseUrl);
 }
