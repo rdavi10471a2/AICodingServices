@@ -78,22 +78,19 @@ public sealed partial class AICodingServicesTools
     }
 
     [McpServerTool]
-    [Description("Return the monitor-owned watched solution index tree as compact JSON: projects, namespaces, and files.")]
-    public AICodingServicesSolutionIndexTree GetSolutionIndexTree()
+    [Description("Return one chunk of the watched solution project/folder/file tree from the monitor-owned index. Read-only planning/exploration tool; no edit session is required.")]
+    public WatchedSolutionStructureResult GetSolutionIndexTree(
+        [Description("Number of indexed files to skip before returning this chunk. Use nextSkipFiles from the previous response to continue.")] int skipFiles = 0,
+        [Description("Maximum indexed files to include in this chunk.")] int maxFiles = 500)
     {
         runtimeState.Touch();
-        IReadOnlyList<IndexedProjectRow> projects = queryService.ListProjects();
-        IReadOnlyList<IndexedDocumentRow> documents = queryService.ListDocuments();
-        IReadOnlyList<AICodingServicesNamespaceTree> namespaces = queryService.ListSymbols()
-            .GroupBy(symbol => symbol.Namespace)
-            .OrderBy(group => group.Key, StringComparer.Ordinal)
-            .Select(group => new AICodingServicesNamespaceTree(
-                group.Key,
-                group.Select(symbol => symbol.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-                group.Count()))
-            .ToArray();
-
-        return new AICodingServicesSolutionIndexTree(projects, documents, namespaces);
+        return WatchedSolutionStructureBuilder.Build(
+            settings,
+            queryService.GetSummary(),
+            queryService.ListProjects(),
+            queryService.ListDocuments(),
+            skipFiles,
+            maxFiles);
     }
 
     [McpServerTool]

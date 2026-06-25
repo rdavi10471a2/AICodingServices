@@ -1,0 +1,141 @@
+@page "/workflow-board"
+@rendermode InteractiveServer
+
+<PageTitle>Workflow Board</PageTitle>
+
+<section class="workflow-board-page">
+    <header class="workflow-header">
+        <div>
+            <h1>Workflow Board</h1>
+            <p>@model.WatchedSolutionPath</p>
+        </div>
+        <RadzenButton Text="Refresh" Icon="refresh" ButtonStyle="ButtonStyle.Light" Click="Refresh" />
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="board-error">@errorMessage</div>
+    }
+
+    <div class="workflow-layout">
+        <section class="board-left" aria-label="Task board">
+            <RadzenCard class="new-task-panel">
+                <div class="compact-form">
+                    <RadzenTextBox @bind-Value="newTaskName" Placeholder="New task name" />
+                    <RadzenButton Text="Create" Icon="add" ButtonStyle="ButtonStyle.Primary" Click="CreateTask" Disabled="@string.IsNullOrWhiteSpace(newTaskName)" />
+                </div>
+            </RadzenCard>
+
+            <div class="kanban-grid">
+                @foreach (TaskBoardColumnViewModel column in model.Columns)
+                {
+                    <section class="kanban-column @(column.StateCode == "Active" ? "active-column" : string.Empty)">
+                        <div class="column-header">
+                            <h2>@column.StateName</h2>
+                            <span>@column.Tasks.Count</span>
+                        </div>
+                        <div class="task-list">
+                            @if (column.Tasks.Count == 0)
+                            {
+                                <div class="empty-column">No tasks</div>
+                            }
+                            @foreach (TaskBoardTaskViewModel task in column.Tasks)
+                            {
+                                <button class="task-card @(IsSelected(task.Id) ? "selected-task" : string.Empty)" type="button" @onclick="() => SelectTask(task.Id)">
+                                    <strong>@task.Name</strong>
+                                    <span>@task.UpdatedLabel</span>
+                                    <span>@task.FileCount file@(task.FileCount == 1 ? string.Empty : "s")</span>
+                                </button>
+                            }
+                        </div>
+                    </section>
+                }
+            </div>
+        </section>
+
+        <aside class="task-detail" aria-label="Selected task details">
+            @if (model.SelectedTask is null)
+            {
+                <div class="empty-detail">
+                    <h2>No Task Selected</h2>
+                    <p>Create or select a task to inspect details.</p>
+                </div>
+            }
+            else
+            {
+                <div class="detail-header">
+                    <div>
+                        <h2>@model.SelectedTask.Name</h2>
+                        <span>@model.SelectedTask.StateName</span>
+                    </div>
+                    <span>@model.SelectedTask.UpdatedLabel</span>
+                </div>
+
+                <div class="state-actions">
+                    @foreach (TaskBoardColumnViewModel column in model.Columns)
+                    {
+                        <RadzenButton Text="@column.StateName" ButtonStyle="@(column.StateCode == model.SelectedTask.StateCode ? ButtonStyle.Primary : ButtonStyle.Light)" Click="() => MoveSelectedTask(column.StateCode)" Disabled="@(column.StateCode == model.SelectedTask.StateCode)" />
+                    }
+                </div>
+
+                <section class="detail-section">
+                    <div class="section-heading">
+                        <h3>Notes</h3>
+                        <RadzenButton Text="Save" Icon="save" ButtonStyle="ButtonStyle.Light" Click="SaveNotes" />
+                    </div>
+                    <RadzenTextArea @bind-Value="notesMarkdown" Rows="9" Placeholder="Task notes in Markdown" />
+                    @if (!string.IsNullOrWhiteSpace(model.SelectedTask.NotesMarkdownPath))
+                    {
+                        <p class="path-hint">@model.SelectedTask.NotesMarkdownPath</p>
+                    }
+                </section>
+
+                <section class="detail-section">
+                    <div class="section-heading">
+                        <h3>Files</h3>
+                    </div>
+                    <div class="file-form">
+                        <RadzenTextBox @bind-Value="newFilePath" Placeholder="Relative solution path" />
+                        <RadzenTextBox @bind-Value="newFileIntent" Placeholder="Intent" />
+                        <RadzenTextBox @bind-Value="newFileRole" Placeholder="Role" />
+                        <RadzenButton Text="Add" Icon="note_add" ButtonStyle="ButtonStyle.Light" Click="AddFile" Disabled="@string.IsNullOrWhiteSpace(newFilePath)" />
+                    </div>
+                    <div class="file-list">
+                        @if (model.SelectedTask.Files.Count == 0)
+                        {
+                            <div class="empty-column">No planned files</div>
+                        }
+                        @foreach (TaskBoardFileViewModel file in model.SelectedTask.Files)
+                        {
+                            <div class="file-row">
+                                <strong>@file.RelativePath</strong>
+                                <span>@file.Intent</span>
+                                <span>@file.FileRole</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <section class="detail-section">
+                    <div class="section-heading">
+                        <h3>Events</h3>
+                    </div>
+                    <div class="comment-form">
+                        <RadzenTextBox @bind-Value="newComment" Placeholder="Add event note" />
+                        <RadzenButton Text="Add" Icon="add_comment" ButtonStyle="ButtonStyle.Light" Click="AddComment" Disabled="@string.IsNullOrWhiteSpace(newComment)" />
+                    </div>
+                    <div class="event-list">
+                        @foreach (TaskBoardEventViewModel taskEvent in model.SelectedTask.Events)
+                        {
+                            <div class="event-row">
+                                <span>@taskEvent.CreatedLabel</span>
+                                <strong>@taskEvent.EventTypeName</strong>
+                                <p>@taskEvent.Message</p>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        </aside>
+    </div>
+</section>

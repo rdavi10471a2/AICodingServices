@@ -11,4 +11,20 @@ public static class MonitorDataPaths
             "data",
             "solution-index.sqlite");
     }
+
+    public static string GetDefaultPlanningDatabasePath(MonitorSettings settings)
+    {
+        return Path.Combine(
+            MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
+            "planning",
+            "board.sqlite");
+    }
+
+    public static string GetDefaultTaskMemoryRoot(MonitorSettings settings)
+    {
+        return Path.Combine(
+            MonitorWorkspacePaths.GetWatchedSolutionWorkspaceRoot(settings),
+            "planning",
+            "task-memory");
+    }
 }

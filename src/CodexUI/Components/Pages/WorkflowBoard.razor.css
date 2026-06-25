@@ -1,0 +1,259 @@
+.workflow-board-page {
+    margin: 0;
+    max-width: none;
+    padding: 1.4rem 1.8rem 2rem;
+}
+
+.workflow-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.workflow-header h1 {
+    font-size: 1.8rem;
+    line-height: 1;
+    margin: 0;
+}
+
+.workflow-header p {
+    color: #657387;
+    font-size: 0.9rem;
+    margin: 0.45rem 0 0;
+    overflow-wrap: anywhere;
+}
+
+.board-error {
+    background: #fff5f5;
+    border: 1px solid #feb2b2;
+    border-radius: 8px;
+    color: #9b2c2c;
+    margin-bottom: 1rem;
+    padding: 0.8rem 1rem;
+}
+
+.workflow-layout {
+    align-items: start;
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.75fr);
+}
+
+.board-left,
+.task-detail {
+    min-width: 0;
+}
+
+.new-task-panel {
+    border: 1px solid #d9e0e7;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    margin-bottom: 1rem;
+    padding: 0.85rem;
+}
+
+.compact-form {
+    align-items: center;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(180px, 1fr) auto;
+}
+
+.kanban-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(3, minmax(190px, 1fr));
+}
+
+.kanban-column {
+    background: #f8fafc;
+    border: 1px solid #d9e0e7;
+    border-radius: 8px;
+    min-height: 240px;
+    min-width: 0;
+}
+
+.active-column {
+    border-color: #2f6fed;
+}
+
+.column-header {
+    align-items: center;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0.7rem 0.8rem;
+}
+
+.column-header h2 {
+    font-size: 0.9rem;
+    line-height: 1;
+    margin: 0;
+}
+
+.column-header span {
+    color: #657387;
+    font-weight: 700;
+}
+
+.task-list {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.7rem;
+}
+
+.task-card {
+    background: #ffffff;
+    border: 1px solid #d9e0e7;
+    border-radius: 8px;
+    color: #202833;
+    cursor: pointer;
+    display: grid;
+    gap: 0.35rem;
+    min-height: 88px;
+    padding: 0.75rem;
+    text-align: left;
+}
+
+.task-card:hover,
+.selected-task {
+    border-color: #2f6fed;
+}
+
+.task-card strong,
+.file-row strong {
+    overflow-wrap: anywhere;
+}
+
+.task-card span,
+.file-row span,
+.event-row span,
+.path-hint {
+    color: #657387;
+    font-size: 0.78rem;
+}
+
+.empty-column,
+.empty-detail {
+    color: #657387;
+    padding: 0.8rem;
+}
+
+.task-detail {
+    background: #ffffff;
+    border: 1px solid #d9e0e7;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    padding: 1rem;
+}
+
+.detail-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.detail-header h2 {
+    font-size: 1.15rem;
+    line-height: 1.2;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.detail-header span {
+    color: #657387;
+    font-size: 0.82rem;
+}
+
+.state-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin: 1rem 0;
+}
+
+.detail-section {
+    border-top: 1px solid #e2e8f0;
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem 0 0;
+}
+
+.detail-section + .detail-section {
+    margin-top: 1rem;
+}
+
+.section-heading {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+}
+
+.section-heading h3 {
+    font-size: 0.9rem;
+    line-height: 1;
+    margin: 0;
+}
+
+.file-form {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.8fr) minmax(90px, 0.45fr) auto;
+}
+
+.comment-form {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: minmax(140px, 1fr) auto;
+}
+
+.file-list,
+.event-list {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.file-row,
+.event-row {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.65rem;
+}
+
+.event-row p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 1180px) {
+    .workflow-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .kanban-grid {
+        grid-template-columns: repeat(2, minmax(190px, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .workflow-header,
+    .compact-form,
+    .file-form,
+    .comment-form {
+        align-items: stretch;
+        grid-template-columns: 1fr;
+    }
+
+    .workflow-header {
+        flex-direction: column;
+    }
+
+    .kanban-grid {
+        grid-template-columns: 1fr;
+    }
+}

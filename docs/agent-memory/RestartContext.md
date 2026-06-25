@@ -5,19 +5,21 @@ Use this file after context loss, plugin restarts, or MCP reconnects. Keep it cu
 ## Current Defaults
 
 - Primary repo: `C:\VSCodeProjects\CodingServices`
-- Watched solution: local config currently targets `C:\VSCodeProjects\CodingServices\AICodingServices.slnx`; confirm with `get_monitor_status` or the CodexUI dashboard after restart
+- Current branch: `codex/Microsoft-Agent-Framework-Base-Planning`
+- Work mode: direct CodingServices repo edits and tests; do not route these CodingServices infrastructure edits through the watched-source workflow.
+- Watched solution: local config targets `C:\VS Code Projects\AIMonitorSchemaStudio\AIMonitorSchemaStudio.slnx`
+- Watched runtime folder: `C:\VSCodeProjects\CodingServices\runtime\watched-solutions\AIMonitorSchemaStudio-9a4ba204f360`
 - Workflow host: CodingServices MCP
 - MCP hub owner: CodexUI
 - Bridge server name: `aicodingservices`
-- Active Codex MCP registration should be `aicodingservices`, launching `C:\VSCodeProjects\CodingServices\src\AICodingServices.McpStdioBridge\bin\Debug\net10.0\AICodingServices.McpStdioBridge.dll` with repo root `C:\VSCodeProjects\CodingServices` and config `C:\VSCodeProjects\CodingServices\config\appsettings.json`
-- CodexUI should run from `C:\VSCodeProjects\CodingServices\src\CodexUI\bin\Debug\net10.0\CodexUI.exe`; current preferred local URL is `http://localhost:5000/`
-- Current handoff: CodingServices is watching itself. CodexUI shows monitor status plus a local Codex Usage panel with last-turn and scanned-window counters.
-- Bridge state: `AICodingServices.McpStdioBridge` is reachable through the CodexUI-owned hub. Use native `aicodingservices` MCP tools when the chat has them mounted; if that transport is stale in an old thread, reconnect in a fresh thread or use the stdio bridge as an MCP fallback.
-- First live check after restart: use `get_monitor_status`, `get_workflow_status`, and `get_self_check` when available.
-- If native `aicodingservices` tools are not visible in the chat, do not assume the MCP is down. Check `codex mcp list` / `codex mcp get aicodingservices`; if the registration is enabled, retarget/reload the chat if possible.
-- If the chat still does not mount native tools, connect directly through `C:\VSCodeProjects\CodingServices\src\AICodingServices.McpStdioBridge\bin\Debug\net10.0\AICodingServices.McpStdioBridge.dll` and pass `--repo-root C:\VSCodeProjects\CodingServices --config C:\VSCodeProjects\CodingServices\config\appsettings.json`. Use raw byte MCP framing or a known-good client; PowerShell text writers can inject a BOM/prefix and break the frame.
-- CodingServices product edits should still go through the CodingServices watched-source workflow when CodingServices is the watched solution: Working candidate, staged review, WinMerge save, recorded decision, and index refresh.
-- Pre-merge validation uses real watched projects with isolated validation artifacts and disables default scoped CSS item discovery during predictive overlay builds so staged `.razor.css` runtime paths do not produce invalid `scopedcss\C:\...` output paths. The accepted real watched-tree build remains authoritative for scoped CSS output after review.
+- Preferred CodexUI URL: `http://localhost:5000/`
+- Task board: `http://localhost:5000/workflow-board`; the user created a task there. The task board is the human-readable planning authority, but no MCP current-task tool exists yet.
+- Active Codex MCP registration should launch the copied bridge DLL: `C:\VSCodeProjects\CodingServices\runtime\mcp-bridge\current\AICodingServices.McpStdioBridge.dll` with repo root `C:\VSCodeProjects\CodingServices` and config `C:\VSCodeProjects\CodingServices\config\appsettings.json`.
+- If native tools are stale or unavailable in a thread, test through the copied bridge DLL first.
+- First live MCP check after restart or new thread: `get_monitor_status`, `get_workflow_status`, `get_self_check`, `get_tool_manifest`.
+- Planning-agent structure check: confirm `get_solution_index_tree` exists and supports `skipFiles` / `maxFiles`; call `get_solution_index_tree(skipFiles: 0, maxFiles: 500)` and continue with `nextSkipFiles` while `hasMore` is true.
+- The solution index was rebuilt by the user after switching the watched target.
+- Recent implementation state: SQLite task-board storage/UI exists; `workflow_tasks` date columns are declared `datetime`; task state/event type use lookup tables; only one Active task is allowed; `get_solution_index_tree` is the chunked read-only project/folder/file structure tool.
 
 ## Memory Rule
 

@@ -17,6 +17,8 @@ public sealed class WorkspaceRepository
         Directory.CreateDirectory(Path.Combine(workspaceRoot, "workflow"));
         Directory.CreateDirectory(Path.Combine(workspaceRoot, "reviews"));
         Directory.CreateDirectory(Path.Combine(workspaceRoot, "logs"));
+        Directory.CreateDirectory(Path.Combine(workspaceRoot, "planning"));
+        Directory.CreateDirectory(MonitorDataPaths.GetDefaultTaskMemoryRoot(settings));
 
         bool indexDatabaseExists = File.Exists(databasePath);
         SolutionIndexDatabase database = new(databasePath);

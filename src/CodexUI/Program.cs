@@ -47,6 +47,7 @@ public static class Program
             services => services.GetRequiredService<LiveMcpTelemetryService>());
         builder.Services.AddSingleton<IDashboardViewService, CodingServicesDashboardViewService>();
         builder.Services.AddSingleton<IWatchedSolutionViewService, WatchedSolutionViewService>();
+        builder.Services.AddSingleton<IWorkflowTaskBoardViewService, WorkflowTaskBoardViewService>();
         builder.Services.AddSingleton<SourceNavigationState>();
 
         WebApplication app = builder.Build();

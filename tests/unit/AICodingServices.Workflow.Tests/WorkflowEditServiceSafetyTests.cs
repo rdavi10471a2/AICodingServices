@@ -401,6 +401,94 @@ public sealed class WorkflowEditServiceSafetyTests
     }
 
     [Fact]
+    public void SubmitSymbol_replaces_attributed_method_block_without_touching_next_method_attributes()
+    {
+        WorkflowFixture fixture = CreateFixture();
+        WorkflowEditService service = new(fixture.Settings);
+        EditSessionStatus refresh = service.Refresh(fixture.ProgramFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, """
+            namespace Example;
+
+            internal sealed class Program
+            {
+                [McpServerTool]
+                [Description("Tool A")]
+                public string ToolA()
+                {
+                    return "A";
+                }
+                [McpServerTool]
+                [Description("Tool B")]
+                public string ToolB()
+                {
+                    return "B";
+                }
+            }
+            """);
+        RoslynEditService roslyn = new(fixture.Settings);
+
+        RoslynEditResult result = roslyn.SubmitSymbol(
+            fixture.ProgramFilePath,
+            """{"containingType":"Program","memberKind":"method","name":"ToolA"}""",
+            """
+            [McpServerTool]
+            [Description("Tool A updated")]
+            public string ToolA()
+            {
+                return "A updated";
+            }
+            """,
+            validateOverlay: false);
+
+        string updated = File.ReadAllText(result.WorkingFilePath);
+        Assert.Contains("[Description(\"Tool A updated\")]", updated, StringComparison.Ordinal);
+        Assert.Contains("return \"A updated\";", updated, StringComparison.Ordinal);
+        Assert.Contains("[Description(\"Tool B\")]", updated, StringComparison.Ordinal);
+        Assert.Contains("public string ToolB()", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Description(\"Tool A\")]", updated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RemoveSymbol_removes_attributed_method_block_without_touching_next_method_attributes()
+    {
+        WorkflowFixture fixture = CreateFixture();
+        WorkflowEditService service = new(fixture.Settings);
+        EditSessionStatus refresh = service.Refresh(fixture.ProgramFilePath);
+        File.WriteAllText(refresh.WorkingFilePath, """
+            namespace Example;
+
+            internal sealed class Program
+            {
+                [McpServerTool]
+                [Description("Tool A")]
+                public string ToolA()
+                {
+                    return "A";
+                }
+                [McpServerTool]
+                [Description("Tool B")]
+                public string ToolB()
+                {
+                    return "B";
+                }
+            }
+            """);
+        RoslynEditService roslyn = new(fixture.Settings);
+
+        RoslynEditResult result = roslyn.RemoveSymbol(
+            fixture.ProgramFilePath,
+            """{"containingType":"Program","memberKind":"method","name":"ToolA"}""",
+            validateOverlay: false);
+
+        string updated = File.ReadAllText(result.WorkingFilePath);
+        Assert.DoesNotContain("ToolA", updated, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Description(\"Tool A\")]", updated, StringComparison.Ordinal);
+        Assert.Contains("[McpServerTool]", updated, StringComparison.Ordinal);
+        Assert.Contains("[Description(\"Tool B\")]", updated, StringComparison.Ordinal);
+        Assert.Contains("public string ToolB()", updated, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReplaceText_honors_occurrence_index_without_adapter_file_writes()
     {
         WorkflowFixture fixture = CreateFixture();

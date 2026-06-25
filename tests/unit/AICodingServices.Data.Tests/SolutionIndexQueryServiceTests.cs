@@ -161,6 +161,160 @@ public sealed class SolutionIndexQueryServiceTests
     }
 
     [Fact]
+    public void WatchedSolutionStructureBuilder_returns_project_folder_and_file_shape()
+    {
+        string tempRoot = CreateTempRoot();
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string projectPath = Path.Combine(watchedRoot, "App", "App.csproj");
+        string modelPath = Path.Combine(watchedRoot, "App", "Models", "Thing.cs");
+        string viewPath = Path.Combine(watchedRoot, "App", "Views", "ThingView.razor");
+        string buildPath = Path.Combine(watchedRoot, "App", "bin", "Debug", "Generated.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(viewPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(buildPath)!);
+        File.WriteAllText(modelPath, "namespace App.Models { public sealed class Thing { } }");
+        File.WriteAllText(viewPath, "<h1>Thing</h1>");
+        File.WriteAllText(buildPath, "namespace App.Build { public sealed class Generated { } }");
+        MonitorSettings settings = MonitorSettings.Create(
+            tempRoot,
+            Path.Combine(watchedRoot, "App.sln"),
+            Path.Combine(tempRoot, "runtime"));
+        SolutionIndexStore store = new(new SolutionIndexDatabase(MonitorDataPaths.GetDefaultIndexDatabasePath(settings)));
+        store.SaveSnapshot(new MSBuildSolutionSnapshot(
+            settings.WatchedSolutionPath,
+            [
+                new MSBuildProjectSnapshot(
+                    "project:app",
+                    "App",
+                    projectPath,
+                    "C#",
+                    "net10.0",
+                    "",
+                    "Exe",
+                    "Microsoft.NET.Sdk",
+                    "App",
+                    "App",
+                    "enable",
+                    "enable",
+                    "latest",
+                    [
+                        new MSBuildDocumentSnapshot("document:model", "Thing.cs", modelPath, ["Models"], ComputeFileHash(modelPath)),
+                        new MSBuildDocumentSnapshot("document:view", "ThingView.razor", viewPath, ["Views"], ComputeFileHash(viewPath)),
+                        new MSBuildDocumentSnapshot("document:build", "Generated.cs", buildPath, ["bin", "Debug"], ComputeFileHash(buildPath))
+                    ],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [])
+            ],
+            []));
+        SolutionIndexQueryService service = SolutionIndexQueryService.Create(settings);
+
+        WatchedSolutionStructureResult result = WatchedSolutionStructureBuilder.Build(
+            settings,
+            service.GetSummary(),
+            service.ListProjects(),
+            service.ListDocuments(),
+            maxFiles: 20);
+
+        WatchedProjectStructure project = Assert.Single(result.Projects);
+        Assert.Equal("App", project.Name);
+        Assert.Equal("App/App.csproj", project.RelativeProjectPath);
+        Assert.Equal(3, project.DocumentCount);
+        Assert.Equal(3, project.ReturnedDocumentCount);
+        Assert.Contains(project.Children, node => node.Kind == "folder" && node.Name == "Models");
+        Assert.Contains(project.Children, node => node.Kind == "folder" && node.Name == "Views");
+        Assert.DoesNotContain(project.Children, node => node.Name == "bin");
+        WatchedSourceTreeNode models = Assert.Single(project.Children, node => node.Name == "Models");
+        WatchedSourceTreeNode modelFile = Assert.Single(models.Children);
+        Assert.Equal("file", modelFile.Kind);
+        Assert.Equal("App/Models/Thing.cs", modelFile.RelativePath);
+        Assert.Equal("Models/Thing.cs", modelFile.ProjectRelativePath);
+        Assert.Equal("CS", modelFile.Extension);
+    }
+
+    [Fact]
+    public void WatchedSolutionStructureBuilder_returns_explicit_file_chunks()
+    {
+        string tempRoot = CreateTempRoot();
+        string watchedRoot = Path.Combine(tempRoot, "Watched");
+        string firstPath = Path.Combine(watchedRoot, "App", "First.cs");
+        string secondPath = Path.Combine(watchedRoot, "App", "Second.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(firstPath)!);
+        File.WriteAllText(firstPath, "namespace App { public sealed class First { } }");
+        File.WriteAllText(secondPath, "namespace App { public sealed class Second { } }");
+        MonitorSettings settings = MonitorSettings.Create(
+            tempRoot,
+            Path.Combine(watchedRoot, "App.sln"),
+            Path.Combine(tempRoot, "runtime"));
+        SolutionIndexStore store = new(new SolutionIndexDatabase(MonitorDataPaths.GetDefaultIndexDatabasePath(settings)));
+        store.SaveSnapshot(new MSBuildSolutionSnapshot(
+            settings.WatchedSolutionPath,
+            [
+                new MSBuildProjectSnapshot(
+                    "project:app",
+                    "App",
+                    Path.Combine(watchedRoot, "App", "App.csproj"),
+                    "C#",
+                    "net10.0",
+                    "",
+                    "Exe",
+                    "Microsoft.NET.Sdk",
+                    "App",
+                    "App",
+                    "enable",
+                    "enable",
+                    "latest",
+                    [
+                        new MSBuildDocumentSnapshot("document:first", "First.cs", firstPath, [], ComputeFileHash(firstPath)),
+                        new MSBuildDocumentSnapshot("document:second", "Second.cs", secondPath, [], ComputeFileHash(secondPath))
+                    ],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                    [])
+            ],
+            []));
+        SolutionIndexQueryService service = SolutionIndexQueryService.Create(settings);
+
+        WatchedSolutionStructureResult result = WatchedSolutionStructureBuilder.Build(
+            settings,
+            service.GetSummary(),
+            service.ListProjects(),
+            service.ListDocuments(),
+            skipFiles: 0,
+            maxFiles: 1);
+
+        Assert.True(result.HasMore);
+        Assert.Equal(2, result.DocumentCount);
+        Assert.Equal(0, result.SkippedDocumentCount);
+        Assert.Equal(1, result.ReturnedDocumentCount);
+        Assert.Equal(1, result.NextSkipFiles);
+        Assert.True(Assert.Single(result.Projects).HasMore);
+
+        WatchedSolutionStructureResult next = WatchedSolutionStructureBuilder.Build(
+            settings,
+            service.GetSummary(),
+            service.ListProjects(),
+            service.ListDocuments(),
+            skipFiles: result.NextSkipFiles ?? 0,
+            maxFiles: 1);
+
+        Assert.False(next.HasMore);
+        Assert.Equal(1, next.SkippedDocumentCount);
+        Assert.Equal(1, next.ReturnedDocumentCount);
+        Assert.Null(next.NextSkipFiles);
+    }
+
+    [Fact]
     public void FindSymbols_resolves_qualified_constructor_without_homonym_fanout()
     {
         string tempRoot = CreateTempRoot();
